@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { interpolateKeyframes, setKeyframe, evaluateEffect } from '../src/effects/keyframes.js';
 import { parseCubeLUT, sampleLUT } from '../src/effects/lut.js';
 import { linearExpression, effect, ffmpegFilters } from '../src/effects/effects-engine.js';
-import { relinkScore, bestRelink } from '../src/persistence/indexeddb.js';
+import { RandStudioDB, relinkScore, bestRelink } from '../src/persistence/indexeddb.js';
 import { AIProviderRegistry, GatewayProvider } from '../src/ai/provider-registry.js';
 
 const cube=`TITLE "Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1`;
@@ -29,6 +29,12 @@ test('relink scoring prefers exact local file',()=>{
   assert.equal(relinkScore(stored,exact),10);
   assert.equal(bestRelink([stored],exact).item,stored);
   assert.ok(relinkScore(stored,exact)>relinkScore(stored,other));
+});
+
+test('IndexedDB rejects incomplete projects before starting a transaction', async()=>{
+  const db=new RandStudioDB(null);
+  await assert.rejects(db.saveProject({tracks:[]}),/senza id/);
+  await assert.rejects(db.saveProject({id:'project-1'}),/senza timeline/);
 });
 
 test('zero-credit AI blocks remote gateways and allows local gateways',async()=>{

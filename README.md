@@ -84,6 +84,16 @@ La curva continua viene campionata in micro-segmenti deterministici. Ogni segmen
 - template Reel/TikTok, Square, YouTube, Cinema 24p e 4K
 - libreria ampliata di effetti, sticker e grafiche social
 
+### Stato UI e persistenza
+
+`app.js` è l'unica fonte dello stato editor. `finish-ui.js` attende il ripristino iniziale e usa l'API dello stato vivo per template, Kinetic Text, transizioni, keyframe, audio, tracking, maschere e job Vision. Le azioni non rileggono più una seconda copia da IndexedDB e non ricaricano più la pagina dopo ogni click.
+
+- la clip selezionata è risolta tramite `trackId` + `clipId`, non tramite nome/start
+- ogni progetto viene validato prima del salvataggio IndexedDB
+- la preview composita usa gli stessi media dell'editor e ha `pointer-events: none`
+- tab Media e navigazione laterale sono controlli funzionanti
+- gli errori di inizializzazione della UI avanzata sono mostrati anche nell'interfaccia
+
 ## Architettura
 ```text
 src/
@@ -119,6 +129,8 @@ npm test
 npm run check
 npm run build
 ```
+
+Smoke test browser consigliato: applicare i cinque template, aggiungere Titolo e Kinetic Text, quindi provare transizione, keyframe, tracking e maschera verificando che timeline e stato cambino senza reload o errori console.
 
 ## Sicurezza e workflow
 - nessuna API key nel client per il percorso locale
