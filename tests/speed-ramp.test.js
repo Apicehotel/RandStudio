@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createSpeedRamp,rateAt,buildRampSegments,rampTimelineDuration,timelineToSource,sourceToTimeline,withSpeedRamp,withCustomSpeedRamp,clearSpeedRamp} from '../src/core/speed-ramp.js';
+import {atempoFilters} from '../src/core/ffmpeg-compiler.js';
+
+test('preset builds a normalized curve',()=>{const r=createSpeedRamp('punch');assert.equal(r.schema,'randstudio.speed-ramp/v1');assert.equal(r.points[0].t,0);assert.equal(r.points.at(-1).t,1);assert.ok(rateAt(r,.5)>1)});
+test('ramp segments preserve source span',()=>{const r=createSpeedRamp('smoothIn',{samples:8}),s=buildRampSegments(r,2,10);assert.equal(s.length,8);assert.equal(s[0].sourceStart,2);assert.equal(s.at(-1).sourceEnd,10);assert.ok(s.every(x=>x.timelineDuration>0))});
+test('timeline duration changes with speed curve',()=>{const slow=createSpeedRamp('slowMo'),fast=createSpeedRamp('speedUp');assert.ok(rampTimelineDuration(slow,0,10)>rampTimelineDuration(fast,0,10))});
+test('timeline/source mappings are monotonic and approximately inverse',()=>{const r=createSpeedRamp('punch'),d=rampTimelineDuration(r,3,13),timeline=d*.63,source=timelineToSource(r,3,13,timeline),back=sourceToTimeline(r,3,13,source);assert.ok(source>=3&&source<=13);assert.ok(Math.abs(back-timeline)<.02)});
+test('with and clear speed ramp update timeline duration',()=>{const clip={start:5,in:0,out:10,playbackRate:1};const ramped=withSpeedRamp(clip,'speedUp');assert.ok(ramped.speedRamp);assert.ok(ramped.end>5);const clear=clearSpeedRamp(ramped);assert.equal(clear.speedRamp,undefined);assert.equal(clear.end,15)});
+test('custom curve supports start mid end rates',()=>{const clip={start:0,in:0,out:8,playbackRate:1},r=withCustomSpeedRamp(clip,[{t:0,rate:1},{t:.5,rate:.5},{t:1,rate:2}],{samples:16});assert.equal(r.speedRamp.preset,'custom');assert.equal(r.speedRamp.samples,16);assert.equal(rateAt(r.speedRamp,.5),.5)});
+test('atempo decomposes rates outside one filter range',()=>{assert.deepEqual(atempoFilters(1),[]);assert.ok(atempoFilters(4).length>=2);assert.ok(atempoFilters(.25).length>=2)});
