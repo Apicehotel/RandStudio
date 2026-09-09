@@ -1,6 +1,6 @@
 # RandStudio
 
-RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, grafica, motion, persistenza e AI.
+RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, grafica, motion, sottotitoli, persistenza e AI.
 
 ## Point 1 — motore editor
 - timeline visual/audio multi-track
@@ -48,35 +48,52 @@ Inclusi:
 Gli asset grafici generati vengono rigenerati dal payload e non duplicati permanentemente.
 
 ## Point 6 — Motion FX
-
 `src/graphics/motion-engine.js` aggiunge un contratto `randstudio.motion/v1` applicabile a clip video, immagini e grafiche.
 
-### Motion preset
-- Fade
-- Slide Up
-- Slide Left
-- Pop
-- Bounce
+Preset: Fade, Slide Up, Slide Left, Pop, Bounce. Sono inoltre presenti Light Leak generato localmente, Glitch, Freeze Frame, Split Screen e playback 0.5×/2× con durata/compiler coerenti.
 
-La preview valuta il movimento nel browser; il compiler FFmpeg genera fade e coordinate overlay temporali per i preset supportati.
+## Point 7 — Caption Engine / sottotitoli smart
 
-### Sticker animati
-Gli sticker usano lo stesso Motion Engine; quelli rapidi partono con preset Pop e possono essere sostituiti con Fade/Slide/Bounce.
+`src/captions/caption-engine.js` introduce il contratto `randstudio.caption/v1`. La trascrizione non viene bruciata subito nel video: resta un dato strutturato e genera clip `caption` vere nella timeline.
 
-### Light Leak
-Il Light Leak viene generato localmente via Canvas come PNG trasparente con gradienti e inserito come clip grafica. Nessun asset esterno obbligatorio.
+### Funzioni
+- import SRT
+- import WebVTT
+- export SRT
+- export WebVTT
+- normalizzazione segmenti e word timestamps
+- track dedicata `Sottotitoli`
+- preset Clean, Social Pop, Karaoke e Minimal
+- chunk automatici per frasi brevi da Reel/TikTok
+- safe placement verticale
+- caption rasterizzate via Overlay Engine e incluse nell'export FFmpeg
+- karaoke esportabile come successione di clip con parola attiva evidenziata
+- persistenza del transcript nel progetto
 
-### Glitch
-Preset Glitch integrato nell'Effects Engine con chroma shift + noise in export FFmpeg e preview browser approssimata.
+### Trascrizione automatica
+`src/captions/transcription-provider.js` aggiunge un registry STT separato dall'editor:
 
-### Freeze frame
-Il pulsante Freeze Frame cattura il frame corrente del video, lo salva come PNG locale/IndexedDB e lo inserisce in timeline come clip immagine.
+```text
+clip audio/video
+   |
+   v
+TranscriptionProviderRegistry
+   |                     |
+   v                     v
+Whisper.cpp locale    AI Gateway STT
+   |                     |
+   +------ transcript ----+
+              |
+              v
+     randstudio.caption/v1
+              |
+              v
+       Caption track
+```
 
-### Split screen
-Preset Sinistra/Destra impostano scala e posizione della clip. Due clip sovrapposte con i due preset producono uno split-screen nel render finale.
+Il provider locale è pensato per `whisper.cpp`: il progetto upstream offre anche un esempio WebAssembly/browser, quindi in futuro RandStudio può aggiungere inferenza totalmente browser senza cambiare il Caption Engine. Oggi il percorso locale supportato è un endpoint whisper.cpp raggiungibile (default `127.0.0.1:8080`) oppure il nostro gateway `/transcribe`.
 
-### Velocità
-Controlli 0.5× / 2× aggiornano `playbackRate`, durata timeline e compiler FFmpeg. Il trim/split tiene conto del playback rate.
+Il client non contiene API key. Il gateway remoto riceve il file con `multipart/form-data` e restituisce segmenti/word timestamps normalizzati.
 
 ## Architettura
 ```text
@@ -96,6 +113,9 @@ src/
 ├── graphics/
 │   ├── overlay-engine.js
 │   └── motion-engine.js
+├── captions/
+│   ├── caption-engine.js
+│   └── transcription-provider.js
 ├── persistence/
 │   └── indexeddb.js
 ├── ai/
@@ -119,22 +139,22 @@ npm run build
 
 ## Sicurezza e workflow
 - nessuna API key nel client
-- nessun upload automatico
-- non esporre ComfyUI locale direttamente a Internet
+- nessun upload automatico fuori dalle azioni esplicite di provider
+- non esporre ComfyUI/Whisper locale direttamente a Internet
 - ogni modifica agente: branch dedicata + Pull Request
 - nessun agente scrive o deploya direttamente su `main`
 
-## Prossimi blocchi prodotto
-Restano evoluzioni di livello superiore:
-- speed ramp continuo/curve avanzate, oltre ai rate 0.5×/2×
-- kinetic text / typewriter / karaoke
+## Stato / prossimi blocchi prodotto
+Caption Engine e styling social sono operativi. Restano evoluzioni di livello superiore:
+- kinetic text / typewriter avanzato
+- speed ramp continuo/curve avanzate
 - sticker animati video/GIF
 - easing editor e più keyframe
 - preview composita multi-layer completa per split-screen
-- sottotitoli smart
 - tracking testo/sticker su oggetti
 - maschere, object/background removal, upscale
-- workflow AI reali preconfigurati quando viene scelto il runtime/provider definitivo
+- adapter whisper.cpp WASM completamente browser opzionale
+- workflow AI video reali preconfigurati quando viene scelto il runtime/provider definitivo
 
 ## Licenze
-RandStudio resta senza licenza open-source finché non ne viene scelta una. Prima di distribuire pubblicamente verificare separatamente licenze di FFmpeg, modelli AI, LUT, font, asset e ogni eventuale codice esterno incorporato.
+RandStudio resta senza licenza open-source finché non ne viene scelta una. Prima di distribuire pubblicamente verificare separatamente licenze di FFmpeg, whisper.cpp/modelli Whisper, modelli AI, LUT, font, asset e ogni eventuale codice esterno incorporato.
