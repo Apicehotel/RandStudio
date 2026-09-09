@@ -48,7 +48,8 @@
       <hr>
       <div class="panel-title">Effetti</div>
       <div class="effect-grid" id="effectPresets"><button data-effect-preset="clean">Clean</button><button data-effect-preset="cinematic">Cinema</button><button data-effect-preset="vivid">Vivid</button><button data-effect-preset="bw">B/N</button><button data-effect-preset="vhs">VHS</button><button data-effect-preset="ntsc">NTSC</button></div>
-      <div class="advanced-row"><button id="addBrightnessKeyframeBtn">◆ Keyframe luminosità</button><button id="clearLutBtn">Rimuovi LUT</button></div>
+      <label>Luminosità keyframe<input id="brightnessAmount" type="range" min="0" max="2" step="0.01" value="1"></label>
+      <div class="advanced-row"><button id="addBrightnessKeyframeBtn">◆ Aggiungi keyframe</button><button id="clearLutBtn">Rimuovi LUT</button></div>
       <p class="muted" id="keyframeStatus">Keyframe: nessuno</p>
       <p class="muted effect-note">WebGPU quando disponibile; fallback browser; export autorevole via FFmpeg.</p>
       <hr>
