@@ -12,44 +12,336 @@ import { createDefaultRegistry } from './ai/provider-registry.js';
 import { createWanCameraRequest } from './ai/wan-camera.js';
 import { STICKER_PACK, createGraphicSpec, isGraphicClip, prepareGraphicMedia, renderGraphicBlob } from './graphics/overlay-engine.js';
 import { applyMotionPreset, evaluateMotion } from './graphics/motion-engine.js';
+import { CAPTION_STYLES, normalizeTranscript, parseSRT, parseVTT, toSRT, toVTT, splitForSocial, captionGraphic } from './captions/caption-engine.js';
+import { createTranscriptionRegistry } from './captions/transcription-provider.js';
 
-const $=s=>document.querySelector(s),media=new Map(),db=new RandStudioDB(),comfy=new ComfyUIAdapter();
-let store=new HistoryStore(createProject()),selected=null,currentTime=0,playing=false,raf=null;const pxPerSecond=80;
-const ui={mediaInput:$('#mediaInput'),projectInput:$('#projectInput'),mediaList:$('#mediaList'),dropZone:$('#dropZone'),tracks:$('#timelineTracks'),ruler:$('#ruler'),duration:$('#durationLabel'),playhead:$('#playhead'),time:$('#timeLabel'),previewLabel:$('#previewLabel'),image:$('#imagePreview'),video:$('#videoPreview'),audio:$('#audioPreview'),canvas:$('#gpuCanvas'),empty:$('#emptyPreview'),inspector:$('#clipInspector'),inspectorEmpty:$('#inspectorEmpty'),clipName:$('#clipName'),clipStart:$('#clipStart'),clipDuration:$('#clipDuration'),clipIn:$('#clipIn'),clipOut:$('#clipOut'),clipScale:$('#clipScale'),clipRotation:$('#clipRotation'),brightness:$('#brightnessAmount'),keyframeStatus:$('#keyframeStatus'),undo:$('#undoBtn'),redo:$('#redoBtn'),engine:$('#engineStatus'),progress:$('#exportProgress'),gpuStatus:$('#gpuStatus'),storageStatus:$('#storageStatus'),gateway:$('#aiGatewayEndpoint'),aiStatus:$('#aiProviderStatus'),graphicInspector:$('#graphicInspector'),graphicText:$('#graphicText'),graphicSubtitle:$('#graphicSubtitle'),graphicSubtitleRow:$('#graphicSubtitleRow'),graphicFontSize:$('#graphicFontSize'),graphicColor:$('#graphicColor')};
-const gpuRenderer=new WebGPUEffectsRenderer(ui.canvas);
+const $ = (s) => document.querySelector(s);
+const media = new Map();
+const db = new RandStudioDB();
+const comfy = new ComfyUIAdapter();
+let store = new HistoryStore(createProject());
+let selected = null;
+let currentTime = 0;
+let playing = false;
+let raf = null;
+const pxPerSecond = 80;
 
-ui.mediaInput.onchange=e=>importFiles([...e.target.files]);for(const ev of['dragenter','dragover'])ui.dropZone.addEventListener(ev,e=>{e.preventDefault();ui.dropZone.classList.add('drag')});for(const ev of['dragleave','drop'])ui.dropZone.addEventListener(ev,e=>{e.preventDefault();ui.dropZone.classList.remove('drag')});ui.dropZone.addEventListener('drop',e=>importFiles([...e.dataTransfer.files]));
-ui.undo.onclick=()=>{store.undo();selected=null;persistProject();render()};ui.redo.onclick=()=>{store.redo();selected=null;persistProject();render()};$('#addVideoTrackBtn').onclick=()=>commit(addTrack(store.value,'visual'));$('#addAudioTrackBtn').onclick=()=>commit(addTrack(store.value,'audio'));$('#splitBtn').onclick=()=>{if(selected)commit(splitClip(store.value,selected.trackId,selected.clipId,currentTime))};$('#deleteClipBtn').onclick=()=>{if(selected){commit(removeClip(store.value,selected.trackId,selected.clipId));selected=null}};$('#saveProjectBtn').onclick=saveProject;ui.projectInput.onchange=e=>openProject(e.target.files[0]);$('#exportVideoBtn').onclick=exportVideo;ui.playhead.oninput=e=>{currentTime=+e.target.value;syncPreviewToPlayhead();updateTransport()};$('#playBtn').onclick=togglePlay;
-for(const input of[ui.clipName,ui.clipStart,ui.clipDuration,ui.clipIn,ui.clipOut,ui.clipScale,ui.clipRotation])input.addEventListener('change',updateSelectedFromInspector);ui.brightness?.addEventListener('input',previewBrightness);ui.brightness?.addEventListener('change',commitBrightness);$('#addBrightnessKeyframeBtn')?.addEventListener('click',addBrightnessKeyframe);$('#clearLutBtn')?.addEventListener('click',clearLUT);document.querySelectorAll('[data-effect-preset]').forEach(b=>b.addEventListener('click',()=>applyEffectPreset(b.dataset.effectPreset)));document.querySelectorAll('[data-motion-preset]').forEach(b=>b.addEventListener('click',()=>applySelectedMotion(b.dataset.motionPreset)));document.querySelectorAll('[data-speed]').forEach(b=>b.addEventListener('click',()=>setPlaybackRate(+b.dataset.speed)));document.querySelectorAll('[data-ai-motion]').forEach(b=>b.addEventListener('click',()=>runAI(b.dataset.aiMotion)));$('#saveAiGatewayBtn')?.addEventListener('click',()=>{localStorage.setItem('randstudio-ai-gateway',ui.gateway.value.trim());ui.aiStatus.textContent=ui.gateway.value.trim()?'Provider gateway salvato.':'Gateway rimosso; resta ComfyUI locale.'});$('#testAiProviderBtn')?.addEventListener('click',testAIProviders);$('#largeModeBtn')?.addEventListener('click',()=>{const enabled=document.documentElement.classList.toggle('large-mode');localStorage.setItem('randstudio-large-mode',enabled?'1':'0')});if(localStorage.getItem('randstudio-large-mode')==='1')document.documentElement.classList.add('large-mode');ui.gateway.value=localStorage.getItem('randstudio-ai-gateway')||'';
-$('#addTitleBtn').onclick=()=>addGraphic('text',createGraphicSpec('text',{text:'Titolo'}),'Titolo');$('#addLowerThirdBtn').onclick=()=>addGraphic('lower-third',createGraphicSpec('lower-third'),'Lower third');$('#addCalloutBtn').onclick=()=>addGraphic('callout',createGraphicSpec('callout'),'Callout');$('#addArrowBtn').onclick=()=>addGraphic('arrow',createGraphicSpec('arrow'),'Freccia');$('#addLightLeakBtn').onclick=()=>addGraphic('light-leak',createGraphicSpec('light-leak'),'Light leak','fade');$('#freezeFrameBtn').onclick=freezeFrame;$('#splitLeftBtn').onclick=()=>setSplitSide('left');$('#splitRightBtn').onclick=()=>setSplitSide('right');$('#updateGraphicBtn').onclick=updateSelectedGraphic;for(const sticker of STICKER_PACK){const b=document.createElement('button');b.textContent=sticker;b.title=`Sticker ${sticker}`;b.onclick=()=>addGraphic('sticker',createGraphicSpec('sticker',{text:sticker}),`Sticker ${sticker}`,'pop');$('#stickerStrip').append(b)}
+const ui = {
+  mediaInput: $('#mediaInput'), projectInput: $('#projectInput'), mediaList: $('#mediaList'), dropZone: $('#dropZone'), tracks: $('#timelineTracks'), ruler: $('#ruler'), duration: $('#durationLabel'), playhead: $('#playhead'), time: $('#timeLabel'), previewLabel: $('#previewLabel'), image: $('#imagePreview'), video: $('#videoPreview'), audio: $('#audioPreview'), canvas: $('#gpuCanvas'), empty: $('#emptyPreview'), inspector: $('#clipInspector'), inspectorEmpty: $('#inspectorEmpty'), clipName: $('#clipName'), clipStart: $('#clipStart'), clipDuration: $('#clipDuration'), clipIn: $('#clipIn'), clipOut: $('#clipOut'), clipScale: $('#clipScale'), clipRotation: $('#clipRotation'), brightness: $('#brightnessAmount'), keyframeStatus: $('#keyframeStatus'), undo: $('#undoBtn'), redo: $('#redoBtn'), engine: $('#engineStatus'), progress: $('#exportProgress'), gpuStatus: $('#gpuStatus'), storageStatus: $('#storageStatus'), gateway: $('#aiGatewayEndpoint'), aiStatus: $('#aiProviderStatus'), graphicInspector: $('#graphicInspector'), graphicText: $('#graphicText'), graphicSubtitle: $('#graphicSubtitle'), graphicSubtitleRow: $('#graphicSubtitleRow'), graphicFontSize: $('#graphicFontSize'), graphicColor: $('#graphicColor'), captionStyle: $('#captionStyle'), captionLanguage: $('#captionLanguage'), whisperEndpoint: $('#whisperEndpoint'), captionStatus: $('#captionStatus'), captionFileInput: $('#captionFileInput')
+};
 
-async function importFiles(files){for(const file of files){const type=mediaType(file);if(!type)continue;const id=crypto.randomUUID(),duration=await getDuration(file,type),virtualName=`${id}.${extension(file.name)||defaultExt(type)}`,item={id,file,type,name:file.name,duration,url:type==='lut'?'':URL.createObjectURL(file),virtualName};if(type==='lut'){try{item.lut=parseCubeLUT(await file.text(),file.name)}catch(error){status(`LUT non valida: ${error.message}`);continue}}media.set(id,item);try{await db.saveMedia(item)}catch(error){console.warn('Persist media',error)}}ui.mediaInput.value='';renderMedia();ui.storageStatus.textContent='Autosave: media salvati'}
-function addMediaToTimeline(id){const item=media.get(id);if(!item||item.type==='lut')return;const p=store.value,t=p.tracks.find(x=>x.kind===(item.type==='audio'?'audio':'visual')),start=Math.max(0,...t.clips.map(c=>c.end),0),duration=item.type==='image'?5:Math.max(.1,item.duration||5);commit(addClip(p,t.id,{sourceId:id,sourceName:item.name,name:item.name,type:item.type,start,in:0,out:duration,duration}))}
-async function addGraphic(type,graphic,name,motionPreset='none'){const p=store.value,t=p.tracks.find(x=>x.kind==='visual'),id=crypto.randomUUID(),start=currentTime>0?currentTime:Math.max(0,...t.clips.map(c=>c.end),0),duration=type==='sticker'?3:type==='light-leak'?2.5:5;let clip={id,sourceId:`graphic:${id}`,sourceName:`${name}.png`,name,type,start,in:0,out:duration,duration,graphic};clip=applyMotionPreset(clip,motionPreset);const next=addClip(p,t.id,clip);store.commit(next);selected={trackId:t.id,clipId:id};await ensureGraphicMedia(findClip(store.value,t.id,id).clip);persistProject();renderMedia();render()}
-async function ensureGraphicMedia(clip){if(!isGraphicClip(clip))return null;const id=`graphic:${clip.id}`,old=media.get(id);if(old?.url)URL.revokeObjectURL(old.url);const blob=await renderGraphicBlob(clip.graphic),item={id,file:blob,type:'image',name:`${clip.name||clip.type}.png`,duration:clip.end-clip.start,virtualName:`graphic-${clip.id}.png`,url:URL.createObjectURL(blob),generated:true};media.set(id,item);return item}
-function applyLUT(id){if(!selected)return status('Seleziona una clip prima della LUT.');const item=media.get(id);if(item?.type!=='lut')return;const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;f.clip.lutSourceId=id;commit(p);status(`LUT ${item.name} applicata.`)}function clearLUT(){if(!selected)return;const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;delete f.clip.lutSourceId;commit(p);status('LUT rimossa.')}
+const gpuRenderer = new WebGPUEffectsRenderer(ui.canvas);
 
-function render(){const p=store.value;ui.undo.disabled=!store.canUndo;ui.redo.disabled=!store.canRedo;const duration=Math.max(1,projectDuration(p));ui.duration.textContent=`${duration.toFixed(1)} s`;ui.playhead.max=String(duration);ui.ruler.style.width=`${Math.max(800,duration*pxPerSecond)}px`;ui.tracks.innerHTML='';for(const track of p.tracks){const row=document.createElement('div');row.className=`track-row ${track.kind==='audio'?'audio':''}`;const label=document.createElement('div');label.className='track-label';label.textContent=track.name;const lane=document.createElement('div');lane.className='track-lane';lane.style.width=`${Math.max(800,duration*pxPerSecond)}px`;for(const clip of track.clips)lane.appendChild(renderClip(track,clip));row.append(label,lane);ui.tracks.append(row)}renderInspector();syncPreviewToPlayhead();updateTransport()}
-function renderClip(track,clip){const el=document.createElement('div');el.className=`clip ${isGraphicClip(clip)?'graphic-clip':''}`;if(selected?.clipId===clip.id)el.classList.add('selected');if(!media.has(clip.sourceId)&&!isGraphicClip(clip))el.classList.add('missing');el.style.left=`${clip.start*pxPerSecond}px`;el.style.width=`${Math.max(28,(clip.end-clip.start)*pxPerSecond)}px`;const fx=clip.effects?.length?` · ${clip.effects.length} FX`:'';el.innerHTML=`<strong>${escapeHtml(clip.name)}</strong><span>${clip.start.toFixed(1)} → ${clip.end.toFixed(1)}${fx}${clip.lutSourceId?' · LUT':''}${clip.motion?.preset&&clip.motion.preset!=='none'?` · ${clip.motion.preset}`:''}${clip.playbackRate&&clip.playbackRate!==1?` · ${clip.playbackRate}×`:''}${isGraphicClip(clip)?' · GFX':''}</span>`;el.onclick=e=>{e.stopPropagation();selected={trackId:track.id,clipId:clip.id};currentTime=Math.max(clip.start,Math.min(currentTime,clip.end));render()};el.onpointerdown=e=>beginDrag(e,el,track.id,clip.id,clip.start);return el}
-function beginDrag(event,el,trackId,clipId,start){if(event.button!==0)return;const origin=event.clientX;el.setPointerCapture(event.pointerId);const move=e=>{el.style.left=`${Math.max(0,start+(e.clientX-origin)/pxPerSecond)*pxPerSecond}px`},end=e=>{el.releasePointerCapture?.(e.pointerId);el.removeEventListener('pointermove',move);el.removeEventListener('pointerup',end);commit(moveClip(store.value,trackId,clipId,round2(Math.max(0,start+(e.clientX-origin)/pxPerSecond))))};el.addEventListener('pointermove',move);el.addEventListener('pointerup',end)}
-function renderMedia(){ui.mediaList.innerHTML='';for(const item of media.values()){if(item.generated)continue;const div=document.createElement('div');div.className='media-item';const icon=item.type==='video'?'▶':item.type==='audio'?'♫':item.type==='lut'?'◫':'▧';div.innerHTML=`<div class="media-thumb">${icon}</div><div class="media-meta"><strong>${escapeHtml(item.name)}</strong><span>${item.type}${item.type==='lut'?` · ${item.lut?.size||'?'}³`:` · ${(item.duration||0).toFixed(1)} s`}</span></div>`;const actions=document.createElement('div');actions.className='media-actions';const main=document.createElement('button');main.textContent=item.type==='lut'?'LUT':'+';main.onclick=()=>item.type==='lut'?applyLUT(item.id):addMediaToTimeline(item.id);actions.append(main);div.append(actions);ui.mediaList.append(div)}}
-function renderInspector(){const f=selected&&findClip(store.value,selected.trackId,selected.clipId);ui.inspector.hidden=!f;ui.inspectorEmpty.hidden=!!f;ui.graphicInspector.hidden=!f||!isGraphicClip(f.clip)||f.clip.type==='light-leak';if(!f)return;const c=f.clip;ui.clipName.value=c.name;ui.clipStart.value=c.start.toFixed(2);ui.clipDuration.value=(c.end-c.start).toFixed(2);ui.clipIn.value=c.in.toFixed(2);ui.clipOut.value=c.out.toFixed(2);ui.clipScale.value=c.transform?.scale??1;ui.clipRotation.value=c.transform?.rotation??0;if(isGraphicClip(c)&&c.type!=='light-leak'){ui.graphicText.value=c.graphic?.text||'';ui.graphicSubtitle.value=c.graphic?.subtitle||'';ui.graphicFontSize.value=c.graphic?.fontSize||72;ui.graphicColor.value=colorHex(c.graphic?.color);ui.graphicSubtitleRow.hidden=c.type!=='lower-third'}const b=c.effects?.find(e=>e.id==='brightness'),local=Math.max(0,currentTime-c.start);ui.brightness.value=b?evaluateEffect(b,local).params.amount:1;ui.keyframeStatus.textContent=`Keyframe luminosità: ${b?.keyframes?.amount?.length||0}${c.lutSourceId?` · LUT: ${media.get(c.lutSourceId)?.name||'mancante'}`:''}`;document.querySelectorAll('[data-effect-preset]').forEach(btn=>btn.classList.toggle('selected-preset',btn.dataset.effectPreset===c.effectPreset));document.querySelectorAll('[data-motion-preset]').forEach(btn=>btn.classList.toggle('selected-preset',btn.dataset.motionPreset===(c.motion?.preset||'none')))}
-function updateSelectedFromInspector(){if(!selected)return;const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;const c=f.clip;c.name=ui.clipName.value||c.name;const start=Math.max(0,+ui.clipStart.value||0),duration=Math.max(.05,+ui.clipDuration.value||.05),i=Math.max(0,+ui.clipIn.value||0),o=Math.max(i+.05,+ui.clipOut.value||duration);c.start=start;c.end=start+duration;c.in=i;c.out=o;c.transform={...(c.transform||{}),scale:+ui.clipScale.value||1,rotation:+ui.clipRotation.value||0};commit(p)}
-async function updateSelectedGraphic(){if(!selected)return;const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f||!isGraphicClip(f.clip)||f.clip.type==='light-leak')return;f.clip.graphic={...f.clip.graphic,text:ui.graphicText.value,subtitle:ui.graphicSubtitle.value,fontSize:Math.max(18,Math.min(180,+ui.graphicFontSize.value||72)),color:ui.graphicColor.value};store.commit(p);await ensureGraphicMedia(findClip(store.value,selected.trackId,selected.clipId).clip);persistProject();render()}
-function applySelectedMotion(presetId){if(!selected)return status('Seleziona una clip.');const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;Object.assign(f.clip,applyMotionPreset(f.clip,presetId));commit(p);status(`Animazione ${presetId} applicata.`)}
-function setPlaybackRate(rate){if(!selected)return status('Seleziona una clip.');const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f||!['video','audio'].includes(f.clip.type))return status('Velocità disponibile per video/audio.');const c=f.clip;c.playbackRate=Math.max(.05,rate);c.end=c.start+(c.out-c.in)/c.playbackRate;commit(p);status(`Velocità ${c.playbackRate}× applicata.`)}
-function setSplitSide(side){if(!selected)return status('Seleziona una clip.');const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;const sign=side==='left'?-1:1;f.clip.transform={...(f.clip.transform||{}),scale:.48,x:sign*p.width*.26,y:0};commit(p);status(`Layout split ${side==='left'?'sinistra':'destra'} applicato. Sovrapponi due clip per split-screen.`)}
-async function freezeFrame(){const f=selected&&findClip(store.value,selected.trackId,selected.clipId);if(!f||f.clip.type!=='video')return status('Seleziona una clip video per Freeze frame.');const item=media.get(f.clip.sourceId);if(!item)return status('Media video mancante.');if(ui.video.src!==item.url)ui.video.src=item.url;await waitVideo(ui.video);ui.video.currentTime=Math.max(f.clip.in,currentTime-f.clip.start+f.clip.in);await new Promise(r=>ui.video.addEventListener('seeked',r,{once:true}));const canvas=document.createElement('canvas');canvas.width=ui.video.videoWidth||1280;canvas.height=ui.video.videoHeight||720;canvas.getContext('2d').drawImage(ui.video,0,0,canvas.width,canvas.height);const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Freeze frame non creato')),'image/png')),id=crypto.randomUUID(),name=`freeze-${formatTime(currentTime).replace(/[:.]/g,'-')}.png`,freeze={id,file:blob,type:'image',name,duration:2,url:URL.createObjectURL(blob),virtualName:`${id}.png`};media.set(id,freeze);try{await db.saveMedia(freeze)}catch{}const p=store.value,t=p.tracks.find(x=>x.kind==='visual'),next=addClip(p,t.id,{sourceId:id,sourceName:name,name:'Freeze frame',type:'image',start:currentTime,in:0,out:2,duration:2});commit(next);renderMedia();status('Freeze frame creato e aggiunto alla timeline.')}
-function commitBrightness(){if(!selected)return;const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;f.clip.effects=updateEffect(f.clip.effects||[],'brightness',{amount:+ui.brightness.value});commit(p)}function previewBrightness(){const f=selected&&findClip(store.value,selected.trackId,selected.clipId);if(!f)return;const temp=structuredClone(f.clip);temp.effects=updateEffect(temp.effects||[],'brightness',{amount:+ui.brightness.value});const item=media.get(temp.sourceId);if(item)showMedia(item,temp,currentTime)}function addBrightnessKeyframe(){if(!selected)return status('Seleziona una clip.');const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;let fx=f.clip.effects?.find(e=>e.id==='brightness')||effect('brightness',{amount:+ui.brightness.value});fx=setKeyframe(fx,'amount',Math.max(0,currentTime-f.clip.start),+ui.brightness.value);f.clip.effects=[...(f.clip.effects||[]).filter(e=>e.id!=='brightness'),fx];commit(p);status('Keyframe luminosità aggiunto.')}function applyEffectPreset(presetId){if(!selected)return status('Seleziona una clip prima di applicare un effetto.');const p=store.value,f=findClip(p,selected.trackId,selected.clipId);if(!f)return;Object.assign(f.clip,applyPreset(f.clip,presetId),{effectPreset:presetId});commit(p);status(`Preset ${presetId.toUpperCase()} applicato.`)}
+ui.mediaInput.onchange = (e) => importFiles([...e.target.files]);
+for (const ev of ['dragenter', 'dragover']) ui.dropZone.addEventListener(ev, (e) => { e.preventDefault(); ui.dropZone.classList.add('drag'); });
+for (const ev of ['dragleave', 'drop']) ui.dropZone.addEventListener(ev, (e) => { e.preventDefault(); ui.dropZone.classList.remove('drag'); });
+ui.dropZone.addEventListener('drop', (e) => importFiles([...e.dataTransfer.files]));
+ui.undo.onclick = () => { store.undo(); selected = null; persistProject(); render(); };
+ui.redo.onclick = () => { store.redo(); selected = null; persistProject(); render(); };
+$('#addVideoTrackBtn').onclick = () => commit(addTrack(store.value, 'visual'));
+$('#addAudioTrackBtn').onclick = () => commit(addTrack(store.value, 'audio'));
+$('#splitBtn').onclick = () => { if (selected) commit(splitClip(store.value, selected.trackId, selected.clipId, currentTime)); };
+$('#deleteClipBtn').onclick = () => { if (selected) { commit(removeClip(store.value, selected.trackId, selected.clipId)); selected = null; } };
+$('#saveProjectBtn').onclick = saveProject;
+ui.projectInput.onchange = (e) => openProject(e.target.files[0]);
+$('#exportVideoBtn').onclick = exportVideo;
+ui.playhead.oninput = (e) => { currentTime = +e.target.value; syncPreviewToPlayhead(); updateTransport(); };
+$('#playBtn').onclick = togglePlay;
+for (const input of [ui.clipName, ui.clipStart, ui.clipDuration, ui.clipIn, ui.clipOut, ui.clipScale, ui.clipRotation]) input.addEventListener('change', updateSelectedFromInspector);
+ui.brightness?.addEventListener('input', previewBrightness);
+ui.brightness?.addEventListener('change', commitBrightness);
+$('#addBrightnessKeyframeBtn')?.addEventListener('click', addBrightnessKeyframe);
+$('#clearLutBtn')?.addEventListener('click', clearLUT);
+document.querySelectorAll('[data-effect-preset]').forEach((b) => b.addEventListener('click', () => applyEffectPreset(b.dataset.effectPreset)));
+document.querySelectorAll('[data-motion-preset]').forEach((b) => b.addEventListener('click', () => applySelectedMotion(b.dataset.motionPreset)));
+document.querySelectorAll('[data-speed]').forEach((b) => b.addEventListener('click', () => setPlaybackRate(+b.dataset.speed)));
+document.querySelectorAll('[data-ai-motion]').forEach((b) => b.addEventListener('click', () => runAI(b.dataset.aiMotion)));
+$('#saveAiGatewayBtn')?.addEventListener('click', () => { localStorage.setItem('randstudio-ai-gateway', ui.gateway.value.trim()); ui.aiStatus.textContent = ui.gateway.value.trim() ? 'Provider gateway salvato.' : 'Gateway rimosso; resta ComfyUI locale.'; });
+$('#testAiProviderBtn')?.addEventListener('click', testAIProviders);
+$('#largeModeBtn')?.addEventListener('click', () => { const enabled = document.documentElement.classList.toggle('large-mode'); localStorage.setItem('randstudio-large-mode', enabled ? '1' : '0'); });
+if (localStorage.getItem('randstudio-large-mode') === '1') document.documentElement.classList.add('large-mode');
+ui.gateway.value = localStorage.getItem('randstudio-ai-gateway') || '';
+ui.whisperEndpoint.value = localStorage.getItem('randstudio-whisper-endpoint') || ui.whisperEndpoint.value;
+ui.whisperEndpoint.addEventListener('change', () => localStorage.setItem('randstudio-whisper-endpoint', ui.whisperEndpoint.value.trim()));
 
-function syncPreviewToPlayhead(){const active=store.value.tracks.flatMap(track=>track.clips.map(clip=>({track,clip}))).filter(({clip})=>currentTime>=clip.start&&currentTime<clip.end).sort((a,b)=>isGraphicClip(a.clip)?-1:isGraphicClip(b.clip)?1:a.track.kind==='audio'?1:-1)[0];if(active){selected={trackId:active.track.id,clipId:active.clip.id};if(isGraphicClip(active.clip)&&!media.has(active.clip.sourceId))ensureGraphicMedia(active.clip).then(()=>syncPreviewToPlayhead());const item=media.get(active.clip.sourceId);if(item)showMedia(item,active.clip,currentTime)}}
-async function showMedia(item,clip=null,t=0){[ui.image,ui.video,ui.audio,ui.canvas].forEach(el=>el.hidden=true);ui.empty.hidden=true;ui.previewLabel.textContent=clip?.name||item.name;if(item.type==='image'){ui.image.src=item.url;await ui.image.decode().catch(()=>{});await showVisual(ui.image,clip,t)}else if(item.type==='video'){if(ui.video.src!==item.url)ui.video.src=item.url;ui.video.playbackRate=Math.max(.05,clip?.playbackRate||1);ui.video.hidden=false;applyVisualState(ui.video,clip,t);if(clip&&Number.isFinite(ui.video.duration))ui.video.currentTime=Math.max(clip.in,(t-clip.start)*Math.max(.05,clip.playbackRate||1)+clip.in);if(!playing)await showVisual(ui.video,clip,t)}else{if(ui.audio.src!==item.url)ui.audio.src=item.url;ui.audio.playbackRate=Math.max(.05,clip?.playbackRate||1);ui.audio.hidden=false}}
-async function showVisual(source,clip,t){const local=Math.max(0,t-(clip?.start||0)),lut=clip?.lutSourceId?media.get(clip.lutSourceId):null,webgpuEligible=!lut&&(clip?.effects||[]).every(e=>['brightness','contrast','saturation','grayscale'].includes(e.id));if(lut?.lut){try{await renderLUTToCanvas(source,ui.canvas,lut.lut);ui.canvas.hidden=false;source.hidden=true;applyTransform(ui.canvas,clip,t);return}catch{}}if(webgpuEligible&&WebGPUEffectsRenderer.supported()){try{if(await gpuRenderer.render(source,clip?.effects||[],local)){ui.canvas.hidden=false;source.hidden=true;applyTransform(ui.canvas,clip,t);return}}catch{}}source.hidden=false;applyVisualState(source,clip,t)}
-function applyTransform(el,clip,t=0){const tr=clip?.transform||{},local=Math.max(0,t-(clip?.start||0)),duration=Math.max(.05,(clip?.end||0)-(clip?.start||0)),m=evaluateMotion(clip?.motion,local,duration),x=(tr.x||0)+m.x,y=(tr.y||0)+m.y,scale=(tr.scale||1)*m.scale;el.style.transform=`translate(${x}px,${y}px) scale(${scale}) rotate(${tr.rotation||0}deg)`;el.style.opacity=String((clip?.opacity??1)*m.opacity)}function applyVisualState(el,clip,t=0){applyTransform(el,clip,t);el.style.filter=cssFilter(clip?.effects||[],Math.max(0,t-(clip?.start||0)))}
+$('#addTitleBtn').onclick = () => addGraphic('text', createGraphicSpec('text', { text: 'Titolo' }), 'Titolo');
+$('#addLowerThirdBtn').onclick = () => addGraphic('lower-third', createGraphicSpec('lower-third'), 'Lower third');
+$('#addCalloutBtn').onclick = () => addGraphic('callout', createGraphicSpec('callout'), 'Callout');
+$('#addArrowBtn').onclick = () => addGraphic('arrow', createGraphicSpec('arrow'), 'Freccia');
+$('#addLightLeakBtn').onclick = () => addGraphic('light-leak', createGraphicSpec('light-leak'), 'Light leak', 'fade');
+$('#freezeFrameBtn').onclick = freezeFrame;
+$('#splitLeftBtn').onclick = () => setSplitSide('left');
+$('#splitRightBtn').onclick = () => setSplitSide('right');
+$('#updateGraphicBtn').onclick = updateSelectedGraphic;
+for (const sticker of STICKER_PACK) {
+  const b = document.createElement('button');
+  b.textContent = sticker;
+  b.title = `Sticker ${sticker}`;
+  b.onclick = () => addGraphic('sticker', createGraphicSpec('sticker', { text: sticker }), `Sticker ${sticker}`, 'pop');
+  $('#stickerStrip').append(b);
+}
 
-function updateTransport(){ui.playhead.value=String(Math.min(+ui.playhead.max,currentTime));ui.time.textContent=formatTime(currentTime)}function togglePlay(){playing=!playing;$('#playBtn').textContent=playing?'❚❚':'▶';if(playing){let last=performance.now();const tick=now=>{if(!playing)return;currentTime+=Math.max(0,(now-last)/1000);last=now;if(currentTime>=+ui.playhead.max){currentTime=0;playing=false;$('#playBtn').textContent='▶'}syncPreviewToPlayhead();updateTransport();if(playing)raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick)}else if(raf)cancelAnimationFrame(raf)}
-function saveProject(){download(new Blob([JSON.stringify(store.value,null,2)],{type:'application/json'}),`${safeName(store.value.name)}.randstudio.json`)}async function openProject(file){if(!file)return;try{const data=JSON.parse(await file.text()),errors=validateProject(data);if(errors.length)throw new Error(errors.join('; '));store=new HistoryStore(data);selected=null;currentTime=0;await hydrateGraphics();await persistProject();renderMedia();render()}catch(error){alert(`Progetto non valido: ${error.message}`)}}async function exportVideo(){try{status('Preparazione overlay e export…');ui.progress.value=0;const prepared=await prepareGraphicMedia(store.value,media),compiled=compileProject(prepared.project,prepared.media);status('Caricamento FFmpeg / rendering locale…');const blob=await renderWithFFmpeg(compiled,p=>ui.progress.value=p);download(blob,compiled.outputName);status('Export completato');ui.progress.value=1}catch(error){console.error(error);status(`Export non riuscito: ${error.message}`)}}
-function commit(next){store.commit(next);persistProject();render()}async function persistProject(){try{await db.saveProject(store.value);ui.storageStatus.textContent='Autosave: salvato'}catch(error){ui.storageStatus.textContent='Autosave: non disponibile';console.warn(error)}}async function hydrateGraphics(){for(const t of store.value.tracks||[])for(const c of t.clips||[])if(isGraphicClip(c))await ensureGraphicMedia(c)}async function restoreSession(){try{const latest=await db.latestProject(),rows=await db.loadAllMedia();for(const row of rows){const file=globalThis.File?new File([row.blob],row.name,{type:row.mime,lastModified:row.lastModified}):row.blob,item={id:row.id,file,type:row.type,name:row.name,duration:row.duration,virtualName:row.virtualName,url:row.type==='lut'?'':URL.createObjectURL(file)};if(row.type==='lut')item.lut=parseCubeLUT(await row.blob.text(),row.name);media.set(item.id,item)}if(latest)store=new HistoryStore(latest);await hydrateGraphics();ui.storageStatus.textContent=`Autosave: ${rows.length} asset ripristinati`;renderMedia();render()}catch(error){ui.storageStatus.textContent='Autosave: nuovo progetto';console.warn(error)}}
-async function testAIProviders(){const gateway=ui.gateway.value.trim();try{await comfy.systemStats();ui.aiStatus.textContent='ComfyUI locale connesso';return}catch{}if(gateway){try{const r=await fetch(`${gateway.replace(/\/$/,'')}/health`);if(r.ok){ui.aiStatus.textContent='AI Gateway connesso';return}}catch{}}ui.aiStatus.textContent='Nessun runtime AI raggiungibile; editor ed effetti restano operativi.'}async function runAI(motion){const request=createWanCameraRequest({prompt:'Cinematic, realistic, stable motion, preserve subject and scene',motion,width:640,height:640,length:81,speed:1}),gateway=ui.gateway.value.trim();if(gateway){try{const registry=createDefaultRegistry({gatewayEndpoint:gateway}),result=await registry.generate('gateway',{type:'wan-camera',request,projectId:store.value.id,clipId:selected?.clipId??null});ui.aiStatus.textContent=`Job AI inviato: ${result.jobId||result.id||'accettato'}`;return}catch(error){ui.aiStatus.textContent=`Gateway AI: ${error.message}`;return}}try{await comfy.systemStats();ui.aiStatus.textContent=`ComfyUI online. Movimento ${motion} pronto.`}catch{ui.aiStatus.textContent='Configura un AI Gateway oppure avvia ComfyUI locale.'}}
-function status(text){ui.engine.textContent=text}function findClip(p,trackId,clipId){const track=p.tracks.find(t=>t.id===trackId),clip=track?.clips.find(c=>c.id===clipId);return clip?{track,clip}:null}function mediaType(f){if(extension(f.name)==='cube')return'lut';if(f.type.startsWith('video/'))return'video';if(f.type.startsWith('audio/'))return'audio';if(f.type.startsWith('image/')||extension(f.name)==='svg')return'image';return null}async function getDuration(file,type){if(type==='image')return 5;if(type==='lut')return 0;return new Promise(resolve=>{const el=document.createElement(type==='audio'?'audio':'video'),url=URL.createObjectURL(file);el.preload='metadata';el.onloadedmetadata=()=>{const d=Number.isFinite(el.duration)?el.duration:5;URL.revokeObjectURL(url);resolve(d)};el.onerror=()=>{URL.revokeObjectURL(url);resolve(5)};el.src=url})}function waitVideo(v){if(v.readyState>=2)return Promise.resolve();return new Promise((resolve,reject)=>{v.addEventListener('loadeddata',resolve,{once:true});v.addEventListener('error',()=>reject(new Error('Video non leggibile')),{once:true})})}function extension(n){return n.includes('.')?n.split('.').pop().toLowerCase():''}function defaultExt(t){return t==='audio'?'mp3':t==='image'?'png':t==='lut'?'cube':'mp4'}function download(blob,name){const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}function safeName(n){return(n||'randstudio-project').replace(/[^a-z0-9_-]+/gi,'-').replace(/^-|-$/g,'').toLowerCase()||'randstudio-project'}function escapeHtml(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}function formatTime(v){const m=Math.floor(v/60),s=Math.floor(v%60),ms=Math.floor(v%1*1000);return`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`}function round2(v){return Math.round(v*100)/100}function colorHex(v){return /^#[0-9a-f]{6}$/i.test(v||'')?v:'#ffffff'}
-window.addEventListener('beforeunload',()=>{for(const item of media.values())if(item.url)URL.revokeObjectURL(item.url)});ui.gpuStatus.textContent=WebGPUEffectsRenderer.supported()?'GPU: WebGPU disponibile':'GPU: fallback browser';render();renderMedia();restoreSession();
+$('#transcribeBtn')?.addEventListener('click', transcribeSelectedClip);
+ui.captionFileInput?.addEventListener('change', (e) => importCaptionFile(e.target.files?.[0]));
+$('#exportSrtBtn')?.addEventListener('click', () => exportCaptions('srt'));
+$('#exportVttBtn')?.addEventListener('click', () => exportCaptions('vtt'));
+
+async function importFiles(files) {
+  for (const file of files) {
+    const type = mediaType(file); if (!type) continue;
+    const id = crypto.randomUUID(), duration = await getDuration(file, type), virtualName = `${id}.${extension(file.name) || defaultExt(type)}`;
+    const item = { id, file, type, name: file.name, duration, url: type === 'lut' ? '' : URL.createObjectURL(file), virtualName };
+    if (type === 'lut') {
+      try { item.lut = parseCubeLUT(await file.text(), file.name); }
+      catch (error) { status(`LUT non valida: ${error.message}`); continue; }
+    }
+    media.set(id, item);
+    try { await db.saveMedia(item); } catch (error) { console.warn('Persist media', error); }
+  }
+  ui.mediaInput.value = '';
+  renderMedia();
+  ui.storageStatus.textContent = 'Autosave: media salvati';
+}
+
+function addMediaToTimeline(id) {
+  const item = media.get(id); if (!item || item.type === 'lut') return;
+  const p = store.value, t = p.tracks.find((x) => x.kind === (item.type === 'audio' ? 'audio' : 'visual'));
+  const start = Math.max(0, ...t.clips.map((c) => c.end), 0), duration = item.type === 'image' ? 5 : Math.max(.1, item.duration || 5);
+  commit(addClip(p, t.id, { sourceId: id, sourceName: item.name, name: item.name, type: item.type, start, in: 0, out: duration, duration }));
+}
+
+async function addGraphic(type, graphic, name, motionPreset = 'none') {
+  const p = store.value, t = p.tracks.find((x) => x.kind === 'visual'), id = crypto.randomUUID();
+  const start = currentTime > 0 ? currentTime : Math.max(0, ...t.clips.map((c) => c.end), 0), duration = type === 'sticker' ? 3 : type === 'light-leak' ? 2.5 : 5;
+  let clip = { id, sourceId: `graphic:${id}`, sourceName: `${name}.png`, name, type, start, in: 0, out: duration, duration, graphic };
+  clip = applyMotionPreset(clip, motionPreset);
+  const next = addClip(p, t.id, clip);
+  store.commit(next);
+  selected = { trackId: t.id, clipId: id };
+  await ensureGraphicMedia(findClip(store.value, t.id, id).clip);
+  persistProject(); renderMedia(); render();
+}
+
+async function ensureGraphicMedia(clip) {
+  if (!isGraphicClip(clip)) return null;
+  const id = `graphic:${clip.id}`, old = media.get(id);
+  if (old?.url) URL.revokeObjectURL(old.url);
+  const blob = await renderGraphicBlob(clip.graphic);
+  const item = { id, file: blob, type: 'image', name: `${clip.name || clip.type}.png`, duration: clip.end - clip.start, virtualName: `graphic-${clip.id}.png`, url: URL.createObjectURL(blob), generated: true };
+  media.set(id, item); return item;
+}
+
+function applyLUT(id) {
+  if (!selected) return status('Seleziona una clip prima della LUT.');
+  const item = media.get(id); if (item?.type !== 'lut') return;
+  const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return;
+  f.clip.lutSourceId = id; commit(p); status(`LUT ${item.name} applicata.`);
+}
+function clearLUT() { if (!selected) return; const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; delete f.clip.lutSourceId; commit(p); status('LUT rimossa.'); }
+
+function render() {
+  const p = store.value;
+  ui.undo.disabled = !store.canUndo; ui.redo.disabled = !store.canRedo;
+  const duration = Math.max(1, projectDuration(p));
+  ui.duration.textContent = `${duration.toFixed(1)} s`; ui.playhead.max = String(duration); ui.ruler.style.width = `${Math.max(800, duration * pxPerSecond)}px`; ui.tracks.innerHTML = '';
+  for (const track of p.tracks) {
+    const row = document.createElement('div'); row.className = `track-row ${track.kind === 'audio' ? 'audio' : ''}`;
+    const label = document.createElement('div'); label.className = 'track-label'; label.textContent = track.name;
+    const lane = document.createElement('div'); lane.className = 'track-lane'; lane.style.width = `${Math.max(800, duration * pxPerSecond)}px`;
+    for (const clip of track.clips) lane.appendChild(renderClip(track, clip));
+    row.append(label, lane); ui.tracks.append(row);
+  }
+  renderInspector(); syncPreviewToPlayhead(); updateTransport();
+}
+
+function renderClip(track, clip) {
+  const el = document.createElement('div');
+  el.className = `clip ${isGraphicClip(clip) ? 'graphic-clip' : ''} ${clip.type === 'caption' ? 'caption-clip' : ''}`;
+  if (selected?.clipId === clip.id) el.classList.add('selected');
+  if (!media.has(clip.sourceId) && !isGraphicClip(clip)) el.classList.add('missing');
+  el.style.left = `${clip.start * pxPerSecond}px`; el.style.width = `${Math.max(28, (clip.end - clip.start) * pxPerSecond)}px`;
+  const fx = clip.effects?.length ? ` · ${clip.effects.length} FX` : '';
+  el.innerHTML = `<strong>${escapeHtml(clip.name)}</strong><span>${clip.start.toFixed(1)} → ${clip.end.toFixed(1)}${fx}${clip.lutSourceId ? ' · LUT' : ''}${clip.motion?.preset && clip.motion.preset !== 'none' ? ` · ${clip.motion.preset}` : ''}${clip.playbackRate && clip.playbackRate !== 1 ? ` · ${clip.playbackRate}×` : ''}${clip.type === 'caption' ? ' · CAP' : isGraphicClip(clip) ? ' · GFX' : ''}</span>`;
+  el.onclick = (e) => { e.stopPropagation(); selected = { trackId: track.id, clipId: clip.id }; currentTime = Math.max(clip.start, Math.min(currentTime, clip.end)); render(); };
+  el.onpointerdown = (e) => beginDrag(e, el, track.id, clip.id, clip.start);
+  return el;
+}
+
+function beginDrag(event, el, trackId, clipId, start) {
+  if (event.button !== 0) return;
+  const origin = event.clientX; el.setPointerCapture(event.pointerId);
+  const move = (e) => { el.style.left = `${Math.max(0, start + (e.clientX - origin) / pxPerSecond) * pxPerSecond}px`; };
+  const end = (e) => { el.releasePointerCapture?.(e.pointerId); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', end); commit(moveClip(store.value, trackId, clipId, round2(Math.max(0, start + (e.clientX - origin) / pxPerSecond)))); };
+  el.addEventListener('pointermove', move); el.addEventListener('pointerup', end);
+}
+
+function renderMedia() {
+  ui.mediaList.innerHTML = '';
+  for (const item of media.values()) {
+    if (item.generated) continue;
+    const div = document.createElement('div'); div.className = 'media-item';
+    const icon = item.type === 'video' ? '▶' : item.type === 'audio' ? '♫' : item.type === 'lut' ? '◫' : '▧';
+    div.innerHTML = `<div class="media-thumb">${icon}</div><div class="media-meta"><strong>${escapeHtml(item.name)}</strong><span>${item.type}${item.type === 'lut' ? ` · ${item.lut?.size || '?'}³` : ` · ${(item.duration || 0).toFixed(1)} s`}</span></div>`;
+    const actions = document.createElement('div'); actions.className = 'media-actions'; const main = document.createElement('button'); main.textContent = item.type === 'lut' ? 'LUT' : '+'; main.onclick = () => item.type === 'lut' ? applyLUT(item.id) : addMediaToTimeline(item.id); actions.append(main); div.append(actions); ui.mediaList.append(div);
+  }
+}
+
+function renderInspector() {
+  const f = selected && findClip(store.value, selected.trackId, selected.clipId);
+  ui.inspector.hidden = !f; ui.inspectorEmpty.hidden = !!f; ui.graphicInspector.hidden = !f || !isGraphicClip(f.clip) || f.clip.type === 'light-leak';
+  if (!f) return;
+  const c = f.clip;
+  ui.clipName.value = c.name; ui.clipStart.value = c.start.toFixed(2); ui.clipDuration.value = (c.end - c.start).toFixed(2); ui.clipIn.value = c.in.toFixed(2); ui.clipOut.value = c.out.toFixed(2); ui.clipScale.value = c.transform?.scale ?? 1; ui.clipRotation.value = c.transform?.rotation ?? 0;
+  if (isGraphicClip(c) && c.type !== 'light-leak') { ui.graphicText.value = c.graphic?.text || ''; ui.graphicSubtitle.value = c.graphic?.subtitle || ''; ui.graphicFontSize.value = c.graphic?.fontSize || 72; ui.graphicColor.value = colorHex(c.graphic?.color); ui.graphicSubtitleRow.hidden = c.type !== 'lower-third'; }
+  const b = c.effects?.find((e) => e.id === 'brightness'), local = Math.max(0, currentTime - c.start); ui.brightness.value = b ? evaluateEffect(b, local).params.amount : 1;
+  ui.keyframeStatus.textContent = `Keyframe luminosità: ${b?.keyframes?.amount?.length || 0}${c.lutSourceId ? ` · LUT: ${media.get(c.lutSourceId)?.name || 'mancante'}` : ''}`;
+  document.querySelectorAll('[data-effect-preset]').forEach((btn) => btn.classList.toggle('selected-preset', btn.dataset.effectPreset === c.effectPreset));
+  document.querySelectorAll('[data-motion-preset]').forEach((btn) => btn.classList.toggle('selected-preset', btn.dataset.motionPreset === (c.motion?.preset || 'none')));
+}
+
+function updateSelectedFromInspector() {
+  if (!selected) return; const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; const c = f.clip;
+  c.name = ui.clipName.value || c.name; const start = Math.max(0, +ui.clipStart.value || 0), duration = Math.max(.05, +ui.clipDuration.value || .05), i = Math.max(0, +ui.clipIn.value || 0), o = Math.max(i + .05, +ui.clipOut.value || duration);
+  c.start = start; c.end = start + duration; c.in = i; c.out = o; c.transform = { ...(c.transform || {}), scale: +ui.clipScale.value || 1, rotation: +ui.clipRotation.value || 0 }; commit(p);
+}
+
+async function updateSelectedGraphic() {
+  if (!selected) return; const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f || !isGraphicClip(f.clip) || f.clip.type === 'light-leak') return;
+  f.clip.graphic = { ...f.clip.graphic, text: ui.graphicText.value, subtitle: ui.graphicSubtitle.value, fontSize: Math.max(18, Math.min(180, +ui.graphicFontSize.value || 72)), color: ui.graphicColor.value };
+  store.commit(p); await ensureGraphicMedia(findClip(store.value, selected.trackId, selected.clipId).clip); persistProject(); render();
+}
+
+function applySelectedMotion(presetId) { if (!selected) return status('Seleziona una clip.'); const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; Object.assign(f.clip, applyMotionPreset(f.clip, presetId)); commit(p); status(`Animazione ${presetId} applicata.`); }
+function setPlaybackRate(rate) { if (!selected) return status('Seleziona una clip.'); const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f || !['video', 'audio'].includes(f.clip.type)) return status('Velocità disponibile per video/audio.'); const c = f.clip; c.playbackRate = Math.max(.05, rate); c.end = c.start + (c.out - c.in) / c.playbackRate; commit(p); status(`Velocità ${c.playbackRate}× applicata.`); }
+function setSplitSide(side) { if (!selected) return status('Seleziona una clip.'); const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; const sign = side === 'left' ? -1 : 1; f.clip.transform = { ...(f.clip.transform || {}), scale: .48, x: sign * p.width * .26, y: 0 }; commit(p); status(`Layout split ${side === 'left' ? 'sinistra' : 'destra'} applicato. Sovrapponi due clip per split-screen.`); }
+
+async function freezeFrame() {
+  const f = selected && findClip(store.value, selected.trackId, selected.clipId); if (!f || f.clip.type !== 'video') return status('Seleziona una clip video per Freeze frame.');
+  const item = media.get(f.clip.sourceId); if (!item) return status('Media video mancante.'); if (ui.video.src !== item.url) ui.video.src = item.url; await waitVideo(ui.video); ui.video.currentTime = Math.max(f.clip.in, currentTime - f.clip.start + f.clip.in); await new Promise((r) => ui.video.addEventListener('seeked', r, { once: true }));
+  const canvas = document.createElement('canvas'); canvas.width = ui.video.videoWidth || 1280; canvas.height = ui.video.videoHeight || 720; canvas.getContext('2d').drawImage(ui.video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => b ? resolve(b) : reject(new Error('Freeze frame non creato')), 'image/png')), id = crypto.randomUUID(), name = `freeze-${formatTime(currentTime).replace(/[:.]/g, '-')}.png`, freeze = { id, file: blob, type: 'image', name, duration: 2, url: URL.createObjectURL(blob), virtualName: `${id}.png` };
+  media.set(id, freeze); try { await db.saveMedia(freeze); } catch {}
+  const p = store.value, t = p.tracks.find((x) => x.kind === 'visual'), next = addClip(p, t.id, { sourceId: id, sourceName: name, name: 'Freeze frame', type: 'image', start: currentTime, in: 0, out: 2, duration: 2 }); commit(next); renderMedia(); status('Freeze frame creato e aggiunto alla timeline.');
+}
+
+function commitBrightness() { if (!selected) return; const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; f.clip.effects = updateEffect(f.clip.effects || [], 'brightness', { amount: +ui.brightness.value }); commit(p); }
+function previewBrightness() { const f = selected && findClip(store.value, selected.trackId, selected.clipId); if (!f) return; const temp = structuredClone(f.clip); temp.effects = updateEffect(temp.effects || [], 'brightness', { amount: +ui.brightness.value }); const item = media.get(temp.sourceId); if (item) showMedia(item, temp, currentTime); }
+function addBrightnessKeyframe() { if (!selected) return status('Seleziona una clip.'); const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; let fx = f.clip.effects?.find((e) => e.id === 'brightness') || effect('brightness', { amount: +ui.brightness.value }); fx = setKeyframe(fx, 'amount', Math.max(0, currentTime - f.clip.start), +ui.brightness.value); f.clip.effects = [...(f.clip.effects || []).filter((e) => e.id !== 'brightness'), fx]; commit(p); status('Keyframe luminosità aggiunto.'); }
+function applyEffectPreset(presetId) { if (!selected) return status('Seleziona una clip prima di applicare un effetto.'); const p = store.value, f = findClip(p, selected.trackId, selected.clipId); if (!f) return; Object.assign(f.clip, applyPreset(f.clip, presetId), { effectPreset: presetId }); commit(p); status(`Preset ${presetId.toUpperCase()} applicato.`); }
+
+async function importCaptionFile(file) {
+  if (!file) return;
+  try {
+    const text = await file.text(); const transcript = extension(file.name) === 'vtt' ? parseVTT(text) : parseSRT(text);
+    await applyTranscriptToTimeline(transcript, ui.captionStyle.value); ui.captionStatus.textContent = `${transcript.segments.length} segmenti importati da ${file.name}.`;
+  } catch (error) { ui.captionStatus.textContent = `Import sottotitoli non riuscito: ${error.message}`; }
+  ui.captionFileInput.value = '';
+}
+
+async function transcribeSelectedClip() {
+  const f = selected && findClip(store.value, selected.trackId, selected.clipId);
+  if (!f || !['video', 'audio'].includes(f.clip.type)) return captionStatus('Seleziona prima una clip audio o video.');
+  const item = media.get(f.clip.sourceId); if (!item?.file) return captionStatus('Media originale non disponibile.');
+  captionStatus('Trascrizione in corso…');
+  const gatewayEndpoint = ui.gateway.value.trim(), whisperEndpoint = ui.whisperEndpoint.value.trim() || 'http://127.0.0.1:8080';
+  try {
+    const registry = createTranscriptionRegistry({ gatewayEndpoint, whisperEndpoint });
+    const providerId = gatewayEndpoint ? 'gateway-stt' : 'whispercpp';
+    const transcript = await registry.transcribe(providerId, { file: item.file, language: ui.captionLanguage.value.trim() || 'auto', wordTimestamps: true });
+    const shifted = shiftTranscript(transcript, f.clip.start - f.clip.in / Math.max(.05, f.clip.playbackRate || 1), f.clip.playbackRate || 1);
+    await applyTranscriptToTimeline(shifted, ui.captionStyle.value);
+    captionStatus(`${shifted.segments.length} segmenti creati con ${providerId === 'whispercpp' ? 'Whisper.cpp locale' : 'AI Gateway STT'}.`);
+  } catch (error) { captionStatus(`Trascrizione non riuscita: ${error.message}`); }
+}
+
+function shiftTranscript(transcript, offset = 0, playbackRate = 1) {
+  const t = normalizeTranscript(transcript), rate = Math.max(.05, Number(playbackRate) || 1);
+  return { ...t, segments: t.segments.map((s) => ({ ...s, start: offset + s.start / rate, end: offset + s.end / rate, words: (s.words || []).map((w) => ({ ...w, start: offset + w.start / rate, end: offset + w.end / rate })) })) };
+}
+
+async function applyTranscriptToTimeline(transcript, styleId = 'social') {
+  const normalized = normalizeTranscript(transcript); if (!normalized.segments.length) throw new Error('Trascrizione vuota');
+  let p = structuredClone(store.value);
+  p.tracks = p.tracks.map((t) => ({ ...t, clips: t.clips.filter((c) => c.type !== 'caption') }));
+  let track = p.tracks.find((t) => t.id === 'captions-1');
+  if (!track) { track = { id: 'captions-1', name: 'Sottotitoli', kind: 'visual', clips: [] }; p.tracks.push(track); }
+  const style = CAPTION_STYLES[styleId] || CAPTION_STYLES.social;
+  const pending = [];
+  for (const segment of normalized.segments) {
+    const chunks = splitForSocial(segment, styleId);
+    for (const chunk of chunks) {
+      if (styleId === 'karaoke' && chunk.words?.length) {
+        for (const word of chunk.words) pending.push({ segment: chunk, start: word.start, end: Math.max(word.start + .05, word.end), activeWord: word.text });
+      } else pending.push({ segment: chunk, start: chunk.start, end: chunk.end, activeWord: '' });
+    }
+  }
+  for (const row of pending) {
+    const id = crypto.randomUUID();
+    const graphic = { ...captionGraphic(row.segment, styleId, row.start), activeWord: row.activeWord };
+    const duration = Math.max(.05, row.end - row.start);
+    p = addClip(p, 'captions-1', { id, sourceId: `graphic:${id}`, sourceName: 'caption.png', name: row.segment.text, type: 'caption', start: row.start, in: 0, out: duration, duration, graphic, caption: { styleId: style.id, segmentId: row.segment.id, activeWord: row.activeWord } });
+  }
+  p.captionTranscript = normalized; p.captionStyle = styleId;
+  store.commit(p); await hydrateGraphics(); await persistProject(); renderMedia(); render();
+}
+
+function exportCaptions(format) {
+  const transcript = store.value.captionTranscript; if (!transcript?.segments?.length) return captionStatus('Nessun sottotitolo da esportare.');
+  const text = format === 'vtt' ? toVTT(transcript) : toSRT(transcript); download(new Blob([text], { type: format === 'vtt' ? 'text/vtt' : 'application/x-subrip' }), `${safeName(store.value.name)}.${format}`); captionStatus(`Sottotitoli esportati in ${format.toUpperCase()}.`);
+}
+function captionStatus(text) { if (ui.captionStatus) ui.captionStatus.textContent = text; }
+
+function syncPreviewToPlayhead() {
+  const active = store.value.tracks.flatMap((track) => track.clips.map((clip) => ({ track, clip }))).filter(({ clip }) => currentTime >= clip.start && currentTime < clip.end).sort((a, b) => a.clip.type === 'caption' ? -1 : b.clip.type === 'caption' ? 1 : isGraphicClip(a.clip) ? -1 : isGraphicClip(b.clip) ? 1 : a.track.kind === 'audio' ? 1 : -1)[0];
+  if (active) { selected = { trackId: active.track.id, clipId: active.clip.id }; if (isGraphicClip(active.clip) && !media.has(active.clip.sourceId)) ensureGraphicMedia(active.clip).then(() => syncPreviewToPlayhead()); const item = media.get(active.clip.sourceId); if (item) showMedia(item, active.clip, currentTime); }
+}
+
+async function showMedia(item, clip = null, t = 0) {
+  [ui.image, ui.video, ui.audio, ui.canvas].forEach((el) => el.hidden = true); ui.empty.hidden = true; ui.previewLabel.textContent = clip?.name || item.name;
+  if (item.type === 'image') { ui.image.src = item.url; await ui.image.decode().catch(() => {}); await showVisual(ui.image, clip, t); }
+  else if (item.type === 'video') { if (ui.video.src !== item.url) ui.video.src = item.url; ui.video.playbackRate = Math.max(.05, clip?.playbackRate || 1); ui.video.hidden = false; applyVisualState(ui.video, clip, t); if (clip && Number.isFinite(ui.video.duration)) ui.video.currentTime = Math.max(clip.in, (t - clip.start) * Math.max(.05, clip.playbackRate || 1) + clip.in); if (!playing) await showVisual(ui.video, clip, t); }
+  else { if (ui.audio.src !== item.url) ui.audio.src = item.url; ui.audio.playbackRate = Math.max(.05, clip?.playbackRate || 1); ui.audio.hidden = false; }
+}
+
+async function showVisual(source, clip, t) {
+  const local = Math.max(0, t - (clip?.start || 0)), lut = clip?.lutSourceId ? media.get(clip.lutSourceId) : null, webgpuEligible = !lut && (clip?.effects || []).every((e) => ['brightness', 'contrast', 'saturation', 'grayscale'].includes(e.id));
+  if (lut?.lut) { try { await renderLUTToCanvas(source, ui.canvas, lut.lut); ui.canvas.hidden = false; source.hidden = true; applyTransform(ui.canvas, clip, t); return; } catch {} }
+  if (webgpuEligible && WebGPUEffectsRenderer.supported()) { try { if (await gpuRenderer.render(source, clip?.effects || [], local)) { ui.canvas.hidden = false; source.hidden = true; applyTransform(ui.canvas, clip, t); return; } } catch {} }
+  source.hidden = false; applyVisualState(source, clip, t);
+}
+
+function applyTransform(el, clip, t = 0) { const tr = clip?.transform || {}, local = Math.max(0, t - (clip?.start || 0)), duration = Math.max(.05, (clip?.end || 0) - (clip?.start || 0)), m = evaluateMotion(clip?.motion, local, duration), x = (tr.x || 0) + m.x, y = (tr.y || 0) + m.y, scale = (tr.scale || 1) * m.scale; el.style.transform = `translate(${x}px,${y}px) scale(${scale}) rotate(${tr.rotation || 0}deg)`; el.style.opacity = String((clip?.opacity ?? 1) * m.opacity); }
+function applyVisualState(el, clip, t = 0) { applyTransform(el, clip, t); el.style.filter = cssFilter(clip?.effects || [], Math.max(0, t - (clip?.start || 0))); }
+
+function updateTransport() { ui.playhead.value = String(Math.min(+ui.playhead.max, currentTime)); ui.time.textContent = formatTime(currentTime); }
+function togglePlay() { playing = !playing; $('#playBtn').textContent = playing ? '❚❚' : '▶'; if (playing) { let last = performance.now(); const tick = (now) => { if (!playing) return; currentTime += Math.max(0, (now - last) / 1000); last = now; if (currentTime >= +ui.playhead.max) { currentTime = 0; playing = false; $('#playBtn').textContent = '▶'; } syncPreviewToPlayhead(); updateTransport(); if (playing) raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); } else if (raf) cancelAnimationFrame(raf); }
+
+function saveProject() { download(new Blob([JSON.stringify(store.value, null, 2)], { type: 'application/json' }), `${safeName(store.value.name)}.randstudio.json`); }
+async function openProject(file) { if (!file) return; try { const data = JSON.parse(await file.text()), errors = validateProject(data); if (errors.length) throw new Error(errors.join('; ')); store = new HistoryStore(data); selected = null; currentTime = 0; await hydrateGraphics(); await persistProject(); renderMedia(); render(); if (store.value.captionTranscript?.segments?.length) captionStatus(`${store.value.captionTranscript.segments.length} segmenti sottotitoli caricati.`); } catch (error) { alert(`Progetto non valido: ${error.message}`); } }
+async function exportVideo() { try { status('Preparazione overlay e export…'); ui.progress.value = 0; const prepared = await prepareGraphicMedia(store.value, media), compiled = compileProject(prepared.project, prepared.media); status('Caricamento FFmpeg / rendering locale…'); const blob = await renderWithFFmpeg(compiled, (p) => ui.progress.value = p); download(blob, compiled.outputName); status('Export completato'); ui.progress.value = 1; } catch (error) { console.error(error); status(`Export non riuscito: ${error.message}`); } }
+
+function commit(next) { store.commit(next); persistProject(); render(); }
+async function persistProject() { try { await db.saveProject(store.value); ui.storageStatus.textContent = 'Autosave: salvato'; } catch (error) { ui.storageStatus.textContent = 'Autosave: non disponibile'; console.warn(error); } }
+async function hydrateGraphics() { for (const t of store.value.tracks || []) for (const c of t.clips || []) if (isGraphicClip(c)) await ensureGraphicMedia(c); }
+async function restoreSession() { try { const latest = await db.latestProject(), rows = await db.loadAllMedia(); for (const row of rows) { const file = globalThis.File ? new File([row.blob], row.name, { type: row.mime, lastModified: row.lastModified }) : row.blob, item = { id: row.id, file, type: row.type, name: row.name, duration: row.duration, virtualName: row.virtualName, url: row.type === 'lut' ? '' : URL.createObjectURL(file) }; if (row.type === 'lut') item.lut = parseCubeLUT(await row.blob.text(), row.name); media.set(item.id, item); } if (latest) store = new HistoryStore(latest); await hydrateGraphics(); ui.storageStatus.textContent = `Autosave: ${rows.length} asset ripristinati`; renderMedia(); render(); if (store.value.captionTranscript?.segments?.length) captionStatus(`${store.value.captionTranscript.segments.length} segmenti sottotitoli ripristinati.`); } catch (error) { ui.storageStatus.textContent = 'Autosave: nuovo progetto'; console.warn(error); } }
+
+async function testAIProviders() { const gateway = ui.gateway.value.trim(); try { await comfy.systemStats(); ui.aiStatus.textContent = 'ComfyUI locale connesso'; return; } catch {} if (gateway) { try { const r = await fetch(`${gateway.replace(/\/$/, '')}/health`); if (r.ok) { ui.aiStatus.textContent = 'AI Gateway connesso'; return; } } catch {} ui.aiStatus.textContent = 'Nessun runtime AI raggiungibile; editor ed effetti restano operativi.'; }
+async function runAI(motion) { const request = createWanCameraRequest({ prompt: 'Cinematic, realistic, stable motion, preserve subject and scene', motion, width: 640, height: 640, length: 81, speed: 1 }), gateway = ui.gateway.value.trim(); if (gateway) { try { const registry = createDefaultRegistry({ gatewayEndpoint: gateway }), result = await registry.generate('gateway', { type: 'wan-camera', request, projectId: store.value.id, clipId: selected?.clipId ?? null }); ui.aiStatus.textContent = `Job AI inviato: ${result.jobId || result.id || 'accettato'}`; return; } catch (error) { ui.aiStatus.textContent = `Gateway AI: ${error.message}`; return; } } try { await comfy.systemStats(); ui.aiStatus.textContent = `ComfyUI online. Movimento ${motion} pronto.`; } catch { ui.aiStatus.textContent = 'Configura un AI Gateway oppure avvia ComfyUI locale.'; } }
+
+function status(text) { ui.engine.textContent = text; }
+function findClip(p, trackId, clipId) { const track = p.tracks.find((t) => t.id === trackId), clip = track?.clips.find((c) => c.id === clipId); return clip ? { track, clip } : null; }
+function mediaType(f) { if (extension(f.name) === 'cube') return 'lut'; if (f.type.startsWith('video/')) return 'video'; if (f.type.startsWith('audio/')) return 'audio'; if (f.type.startsWith('image/') || extension(f.name) === 'svg') return 'image'; return null; }
+async function getDuration(file, type) { if (type === 'image') return 5; if (type === 'lut') return 0; return new Promise((resolve) => { const el = document.createElement(type === 'audio' ? 'audio' : 'video'), url = URL.createObjectURL(file); el.preload = 'metadata'; el.onloadedmetadata = () => { const d = Number.isFinite(el.duration) ? el.duration : 5; URL.revokeObjectURL(url); resolve(d); }; el.onerror = () => { URL.revokeObjectURL(url); resolve(5); }; el.src = url; }); }
+function waitVideo(v) { if (v.readyState >= 2) return Promise.resolve(); return new Promise((resolve, reject) => { v.addEventListener('loadeddata', resolve, { once: true }); v.addEventListener('error', () => reject(new Error('Video non leggibile')), { once: true }); }); }
+function extension(n) { return n.includes('.') ? n.split('.').pop().toLowerCase() : ''; }
+function defaultExt(t) { return t === 'audio' ? 'mp3' : t === 'image' ? 'png' : t === 'lut' ? 'cube' : 'mp4'; }
+function download(blob, name) { const a = document.createElement('a'), url = URL.createObjectURL(blob); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+function safeName(n) { return (n || 'randstudio-project').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'randstudio-project'; }
+function escapeHtml(s) { return String(s).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
+function formatTime(v) { const m = Math.floor(v / 60), s = Math.floor(v % 60), ms = Math.floor(v % 1 * 1000); return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`; }
+function round2(v) { return Math.round(v * 100) / 100; }
+function colorHex(v) { return /^#[0-9a-f]{6}$/i.test(v || '') ? v : '#ffffff'; }
+
+window.addEventListener('beforeunload', () => { for (const item of media.values()) if (item.url) URL.revokeObjectURL(item.url); });
+ui.gpuStatus.textContent = WebGPUEffectsRenderer.supported() ? 'GPU: WebGPU disponibile' : 'GPU: fallback browser';
+render(); renderMedia(); restoreSession();
