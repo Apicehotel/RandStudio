@@ -28,8 +28,6 @@ export async function prepareGraphicMedia(project, mediaById){
   return{project:next,media};
 }
 
-export async function graphicPreviewUrl(spec){return URL.createObjectURL(await renderGraphicBlob(spec))}
-
 export async function renderGraphicBlob(spec){
   const width=Math.max(320,Number(spec.width)||960),height=Math.max(180,Number(spec.height)||420);
   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
