@@ -1,0 +1,2 @@
+export function buildRelinkPlan(project, files){const byName=new Map(files.map(f=>[String(f.name).toLowerCase(),f])),matches=[];for(const track of project?.tracks||[])for(const clip of track.clips||[]){const file=byName.get(String(clip.sourceName||'').toLowerCase());if(file)matches.push({trackId:track.id,clipId:clip.id,sourceId:clip.sourceId,sourceName:clip.sourceName,file})}return matches}
+export function missingSourceIds(project,mediaMap){return[...new Set((project?.tracks||[]).flatMap(t=>t.clips||[]).filter(c=>c.sourceId&&!mediaMap.has(c.sourceId)).map(c=>c.sourceId))]}
