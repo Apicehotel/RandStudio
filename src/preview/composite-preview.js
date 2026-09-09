@@ -1,0 +1,3 @@
+export function activeVisualLayers(project,time){return(project?.tracks||[]).filter(t=>t.kind!=='audio').flatMap((track,trackIndex)=>(track.clips||[]).filter(c=>time>=c.start&&time<c.end).map((clip,clipIndex)=>({track,clip,trackIndex,clipIndex,z:trackIndex*1000+clipIndex}))).sort((a,b)=>a.z-b.z)}
+export function composeLayerState(layer,time){const c=layer.clip,tr=c.transform||{};return{id:c.id,sourceId:c.sourceId,type:c.type,x:Number(tr.x)||0,y:Number(tr.y)||0,scale:Number(tr.scale)||1,rotation:Number(tr.rotation)||0,opacity:Number(c.opacity??1),localTime:Math.max(0,time-c.start),start:c.start,end:c.end}}
+export function compositeSnapshot(project,time){return activeVisualLayers(project,time).map(x=>composeLayerState(x,time))}
