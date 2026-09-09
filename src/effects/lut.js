@@ -32,6 +32,18 @@ export function sampleLUT(lut, rgb) {
   return lut.data[index] ?? rgb;
 }
 
+export function applyLUTToImageData(imageData, lut) {
+  const data=imageData.data;
+  for(let i=0;i<data.length;i+=4){const mapped=sampleLUT(lut,[data[i]/255,data[i+1]/255,data[i+2]/255]);data[i]=Math.round(mapped[0]*255);data[i+1]=Math.round(mapped[1]*255);data[i+2]=Math.round(mapped[2]*255)}
+  return imageData;
+}
+
+export async function renderLUTToCanvas(source, canvas, lut) {
+  const bitmap=await createImageBitmap(source); canvas.width=bitmap.width; canvas.height=bitmap.height;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true}); ctx.drawImage(bitmap,0,0); bitmap.close?.();
+  const pixels=ctx.getImageData(0,0,canvas.width,canvas.height); ctx.putImageData(applyLUTToImageData(pixels,lut),0,0); return true;
+}
+
 function numbers(line) { return line.split(/\s+/).map(Number).filter(Number.isFinite); }
 function normalize(value, min, max) { return Math.max(0, Math.min(1, (value - min) / Math.max(1e-9, max - min))); }
 function escapeFilterPath(value) { return String(value).replace(/\\/g, '/').replace(/'/g, "\\'").replace(/:/g, '\\:'); }
