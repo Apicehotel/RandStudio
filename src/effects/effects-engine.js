@@ -1,3 +1,5 @@
+import { evaluateEffect, normalizeKeyframes } from './keyframes.js';
+
 export const EFFECT_CATEGORIES = Object.freeze(['color','analog','blur','distort','transform','overlay','beauty','ai']);
 
 export const EFFECT_DEFINITIONS = Object.freeze({
@@ -21,9 +23,23 @@ export const EFFECT_PRESETS = Object.freeze({
 });
 
 export function effect(id, values={}){const def=EFFECT_DEFINITIONS[id];if(!def)throw new Error(`Unknown effect: ${id}`);const params={};for(const [key,spec] of Object.entries(def.params))params[key]=clamp(Number(values[key]??spec.default),spec.min,spec.max);return{id,enabled:true,params}}
-export function normalizeEffects(list=[]){return list.map(item=>effect(item.id,item.params)).map((item,i)=>({...item,enabled:list[i]?.enabled!==false}))}
+export function normalizeEffects(list=[]){return list.map(item=>{const base=effect(item.id,item.params);return{...base,enabled:item.enabled!==false,keyframes:normalizeKeyframeMap(item.keyframes)}})}
 export function applyPreset(clip,presetId){const preset=EFFECT_PRESETS[presetId];if(!preset)throw new Error(`Unknown preset: ${presetId}`);return{...clip,effects:structuredClone(preset.effects)}}
-export function cssFilter(effects=[]){return normalizeEffects(effects).filter(e=>e.enabled).map(e=>EFFECT_DEFINITIONS[e.id].css?.(e.params)||'').filter(Boolean).join(' ')||'none'}
-export function ffmpegFilters(effects=[]){return normalizeEffects(effects).filter(e=>e.enabled).map(e=>EFFECT_DEFINITIONS[e.id].ffmpeg?.(e.params)||'').filter(Boolean)}
+export function cssFilter(effects=[],localTime=0){return normalizeEffects(effects).filter(e=>e.enabled).map(e=>{const evaluated=evaluateEffect(e,localTime);return EFFECT_DEFINITIONS[e.id].css?.(evaluated.params)||''}).filter(Boolean).join(' ')||'none'}
+export function ffmpegFilters(effects=[]){return normalizeEffects(effects).filter(e=>e.enabled).map(e=>ffmpegForEffect(e)).filter(Boolean)}
 export function updateEffect(effects,id,params){const next=normalizeEffects(effects);const index=next.findIndex(e=>e.id===id);const value=effect(id,params);if(index<0)next.push(value);else next[index]={...next[index],params:value.params};return next}
+
+function ffmpegForEffect(e){
+  const frames=e.keyframes??{};
+  if(!Object.keys(frames).length)return EFFECT_DEFINITIONS[e.id].ffmpeg?.(e.params)||'';
+  if(e.id==='brightness')return `eq=brightness='${offsetExpression(frames.amount,e.params.amount,-1)}':eval=frame`;
+  if(e.id==='contrast')return `eq=contrast='${linearExpression(frames.amount,e.params.amount)}':eval=frame`;
+  if(e.id==='saturation')return `eq=saturation='${linearExpression(frames.amount,e.params.amount)}':eval=frame`;
+  if(e.id==='grayscale')return `hue=s='1-${linearExpression(frames.amount,e.params.amount)}'`;
+  return EFFECT_DEFINITIONS[e.id].ffmpeg?.(evaluateEffect(e,0).params)||'';
+}
+function offsetExpression(frames,fallback,offset){return `(${linearExpression(frames,fallback)})${offset<0?offset:`+${offset}`}`}
+export function linearExpression(frames,fallback=0){const f=normalizeKeyframes(frames);if(!f.length)return num(fallback);let expr=num(f.at(-1).value);for(let i=f.length-2;i>=0;i--){const a=f[i],b=f[i+1],span=Math.max(.000001,b.time-a.time),segment=`(${num(a.value)}+(${num(b.value)}-${num(a.value)})*(t-${num(a.time)})/${num(span)})`;expr=`if(lt(t,${num(b.time)}),${segment},${expr})`;}return `if(lte(t,${num(f[0].time)}),${num(f[0].value)},${expr})`}
+function normalizeKeyframeMap(map={}){return Object.fromEntries(Object.entries(map).map(([key,frames])=>[key,normalizeKeyframes(frames)]).filter(([,frames])=>frames.length))}
 function clamp(v,min,max){return Math.min(max,Math.max(min,Number.isFinite(v)?v:min))}
+function num(v){return Number(v).toFixed(4).replace(/0+$/,'').replace(/\.$/,'')||'0'}
