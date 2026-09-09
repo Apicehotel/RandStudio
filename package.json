@@ -1,0 +1,19 @@
+{
+  "name": "randstudio",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test",
+    "check": "node --check src/app.js && node --check src/core/composition.js && node --check src/core/history.js && node --check src/core/ffmpeg-compiler.js && node --check src/adapters/ffmpeg-wasm.js"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "0.12.15",
+    "@ffmpeg/util": "0.12.2"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
+}

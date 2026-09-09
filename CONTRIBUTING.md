@@ -1,12 +1,12 @@
 # Contributing to RandStudio
 
-## Branch policy
-- No agent or automation pushes directly to `main`.
-- Changes go through a dedicated branch and Pull Request.
-- Human review is required before merge.
+## Freeze agenti
+- Nessun agente o automazione scrive direttamente su `main`.
+- Ogni modifica passa da branch dedicato e Pull Request.
+- Il merge richiede revisione umana.
 
-## Development priorities
-1. Keep the editor local-first.
-2. Avoid storing API keys in client code.
-3. Prefer modular integrations for FFmpeg, ComfyUI and video AI engines.
-4. Preserve mobile usability and progressive enhancement.
+## Regole tecniche
+- Il Composition JSON è il contratto centrale: UI, export e AI devono parlare con lui.
+- Gli adapter esterni (FFmpeg, ComfyUI, Wan) restano separati dal core.
+- Evitare chiavi/API secret nel browser.
+- Aggiungere test alle operazioni del core prima di estendere la UI.
