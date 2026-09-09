@@ -1,6 +1,6 @@
 # RandStudio
 
-RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, grafica, persistenza e AI.
+RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, grafica, motion, persistenza e AI.
 
 ## Point 1 — motore editor
 - timeline visual/audio multi-track
@@ -11,90 +11,72 @@ RandStudio è uno studio locale-first per foto e video. Il progetto usa un docum
 - CI GitHub Actions
 
 ## Point 2 — AI Lab
-L'AI passa attraverso adapter, registry provider e job; non viene hard-coded nell'editor.
+L'AI passa attraverso adapter, registry provider e job; non viene hard-coded nell'editor. Sono predisposti ComfyUI locale, AI Gateway remoto, contratto `randstudio.wan-camera/v1`, Drone Reveal/Rise/Approach e reinserimento output AI come clip.
 
-```text
-UI -> AI Provider Registry
-      |              |
-      v              v
-  ComfyUI locale   AI Gateway remoto
-      |              |
-      +------ job ----+
-             |
-             v
-      Composition JSON -> Timeline
-```
-
-Implementato: `ComfyUIAdapter`, `AIJobQueue`, `AIProviderRegistry`, `GatewayProvider`, contratto `randstudio.wan-camera/v1`, preset Drone Reveal/Rise/Approach, binding semantico workflow Wan e reinserimento output AI come clip.
-
-Per generare realmente serve almeno un runtime esterno raggiungibile: ComfyUI/Wan locale oppure un gateway AI remoto. Il repository non incorpora pesi multi-GB né credenziali.
+Per generare realmente serve almeno un runtime esterno raggiungibile. Il repository non incorpora pesi multi-GB né credenziali.
 
 ## Point 3 — Rand Design System + Effects Engine
+- app shell responsive con safe-area iOS e modalità Grande
+- WebGPU/fallback browser
+- export FFmpeg autorevole
+- LUT3D e keyframe
+- preset Clean, Cinema, Cinema Pro, Dreamy Glow, Vivid, B/N, VHS, NTSC, Glitch
+- effetti luminosità, contrasto, saturazione, grayscale, blur, glow, vignetta, film grain, glitch, VHS, NTSC, scanlines
 
-### Rand Design System v1
-- app shell editor con rail, media library, preview, inspector e timeline
-- palette dark ad alto contrasto con accent viola/blu
-- token CSS centralizzati
-- safe-area iOS
-- responsive desktop / tablet / smartphone
-- modalità **Grande** persistente
-
-### Effects Engine
-Gli effetti sono dati strutturati sulla clip. Preview WebGPU/fallback browser, export autorevole FFmpeg, LUT3D e keyframe.
-
-Preset inclusi: Clean, Cinema, **Cinema Pro**, Dreamy Glow, Vivid, B/N, VHS, NTSC.
-
-Effetti disponibili nel blocco cinema/overlay: luminosità, contrasto, saturazione, grayscale, blur, glow, vignetta, film grain, VHS, NTSC e scanlines.
-
-AiyaEffectsIOS, VideoBeautify e `ntsc-rs` sono usati come riferimenti architetturali. Non vengono copiati SDK iOS, asset proprietari o codice con licenza incerta.
+AiyaEffectsIOS, VideoBeautify e `ntsc-rs` restano riferimenti architetturali, non dipendenze copiate.
 
 ## Point 4 — Advanced Runtime
-
-### WebGPU
-`src/effects/webgpu-renderer.js` implementa preview real-time di luminosità, contrasto, saturazione e grayscale. Fallback browser automatico.
-
-### LUT `.cube`
-Import, parser/validazione, preview canvas, persistenza e export FFmpeg `lut3d`.
-
-### Keyframe
-Keyframe numerici, interpolazione preview e expression compiler FFmpeg per i controlli colore supportati.
-
-### IndexedDB / relink
-`src/persistence/indexeddb.js` salva progetto, blob media, LUT e metadati di relink; ripristino automatico all'avvio.
-
-### Provider AI
-`src/ai/provider-registry.js` separa UI e provider con ComfyUI locale e gateway remoto/self-hosted.
+- WebGPU preview
+- LUT `.cube`
+- keyframe numerici
+- IndexedDB/relink
+- AI Provider Registry
 
 ## Point 5 — Text / Sticker / Overlay Engine
+`src/graphics/overlay-engine.js` introduce elementi grafici come clip vere della Composition.
 
-`src/graphics/overlay-engine.js` introduce elementi grafici come clip vere della Composition, non come decorazioni fuori timeline.
-
-### Elementi inclusi
+Inclusi:
 - Titolo statico
-- Lower third con titolo + sottotitolo
+- Lower third titolo + sottotitolo
 - Callout
 - Freccia
 - sticker rapidi emoji
-- sticker PNG/SVG importabili come normali media
+- sticker PNG/SVG importabili
+- payload `randstudio.graphic/v1`
+- rasterizzazione Canvas -> PNG trasparente per export FFmpeg stabile
 
-Ogni elemento grafico conserva un payload `randstudio.graphic/v1` con testo, font size, colore, background, accent e padding. Le clip grafiche hanno start/end/transform/effects come le altre clip, quindi possono essere spostate, scalate, ruotate, splittate e ricevere effetti.
+Gli asset grafici generati vengono rigenerati dal payload e non duplicati permanentemente.
 
-### Rendering grafica
-Per evitare dipendenze da font FFmpeg o SVG decoder variabili, RandStudio rasterizza gli overlay nel browser su PNG trasparente prima dell'export. Il PNG generato viene poi trattato dal compiler come un normale input visuale FFmpeg. Questo rende l'export più prevedibile su FFmpeg WASM.
+## Point 6 — Motion FX
 
-```text
-Graphic Clip
-   |
-   +--> Canvas renderer -> PNG trasparente
-   |                         |
-   |                         v
-   +--> preview          FFmpeg input
-                              |
-                              v
-                         export finale
-```
+`src/graphics/motion-engine.js` aggiunge un contratto `randstudio.motion/v1` applicabile a clip video, immagini e grafiche.
 
-Gli asset grafici generati non vengono salvati come duplicati permanenti: vengono rigenerati dal payload `graphic` dopo restore o modifica del testo.
+### Motion preset
+- Fade
+- Slide Up
+- Slide Left
+- Pop
+- Bounce
+
+La preview valuta il movimento nel browser; il compiler FFmpeg genera fade e coordinate overlay temporali per i preset supportati.
+
+### Sticker animati
+Gli sticker usano lo stesso Motion Engine; quelli rapidi partono con preset Pop e possono essere sostituiti con Fade/Slide/Bounce.
+
+### Light Leak
+Il Light Leak viene generato localmente via Canvas come PNG trasparente con gradienti e inserito come clip grafica. Nessun asset esterno obbligatorio.
+
+### Glitch
+Preset Glitch integrato nell'Effects Engine con chroma shift + noise in export FFmpeg e preview browser approssimata.
+
+### Freeze frame
+Il pulsante Freeze Frame cattura il frame corrente del video, lo salva come PNG locale/IndexedDB e lo inserisce in timeline come clip immagine.
+
+### Split screen
+Preset Sinistra/Destra impostano scala e posizione della clip. Due clip sovrapposte con i due preset producono uno split-screen nel render finale.
+
+### Velocità
+Controlli 0.5× / 2× aggiornano `playbackRate`, durata timeline e compiler FFmpeg. Il trim/split tiene conto del playback rate.
 
 ## Architettura
 ```text
@@ -112,7 +94,8 @@ src/
 │   ├── lut.js
 │   └── webgpu-renderer.js
 ├── graphics/
-│   └── overlay-engine.js
+│   ├── overlay-engine.js
+│   └── motion-engine.js
 ├── persistence/
 │   └── indexeddb.js
 ├── ai/
@@ -134,13 +117,6 @@ npm run check
 npm run build
 ```
 
-## Dipendenze runtime browser
-- `@ffmpeg/ffmpeg` 0.12.15
-- `@ffmpeg/util` 0.12.2
-- WebGPU opzionale
-- IndexedDB nativo browser
-- Canvas 2D nativo per text/sticker/callout rasterization
-
 ## Sicurezza e workflow
 - nessuna API key nel client
 - nessun upload automatico
@@ -149,12 +125,13 @@ npm run build
 - nessun agente scrive o deploya direttamente su `main`
 
 ## Prossimi blocchi prodotto
-Il blocco base **Effetti + Testi + Sticker** è ora operativo. Le prossime evoluzioni sono:
-- testi animati / kinetic text
-- sticker animati e overlay video
-- easing/spring e più keyframe
-- speed ramp / freeze frame / split screen
-- sottotitoli smart e karaoke
+Restano evoluzioni di livello superiore:
+- speed ramp continuo/curve avanzate, oltre ai rate 0.5×/2×
+- kinetic text / typewriter / karaoke
+- sticker animati video/GIF
+- easing editor e più keyframe
+- preview composita multi-layer completa per split-screen
+- sottotitoli smart
 - tracking testo/sticker su oggetti
 - maschere, object/background removal, upscale
 - workflow AI reali preconfigurati quando viene scelto il runtime/provider definitivo
