@@ -92,6 +92,9 @@ La curva continua viene campionata in micro-segmenti deterministici. Ogni segmen
 - ogni progetto viene validato prima del salvataggio IndexedDB
 - la preview composita usa gli stessi media dell'editor e ha `pointer-events: none`
 - tab Media e navigazione laterale sono controlli funzionanti
+- ricerca e filtro tipo Media restano combinati dopo ogni aggiornamento della libreria
+- i controlli restano inattivi soltanto durante il ripristino iniziale, evitando click persi
+- la rimozione sfondo locale aggiorna media, clip e preview senza riletture IndexedDB o reload
 - gli errori di inizializzazione della UI avanzata sono mostrati anche nell'interfaccia
 
 ## Architettura

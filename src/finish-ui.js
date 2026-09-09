@@ -22,11 +22,10 @@ const EXTRA_GRAPHICS=[
 ];
 
 boot();
-async function boot(){try{await appReady;await refreshData();wire();injectLibraries();await initComposite();document.addEventListener('randstudio:project-change',e=>{snapshot=e.detail.project;lastTime=-1})}catch(e){console.error('RandStudio finish UI',e);note(`UI avanzata non disponibile: ${e.message}`)}}
+async function boot(){try{await appReady;await refreshData();wire();injectLibraries();await initComposite();document.addEventListener('randstudio:project-change',e=>{snapshot=e.detail.project;lastTime=-1});document.addEventListener('randstudio:media-change',()=>{mediaRows=getMediaSnapshot();lastTime=-1})}catch(e){console.error('RandStudio finish UI',e);note(`UI avanzata non disponibile: ${e.message}`)}}
 function wire(){
   $('#addKineticBtn')?.addEventListener('click',addKinetic);
   document.querySelectorAll('[data-project-template]').forEach(b=>b.addEventListener('click',()=>applyTemplate(b.dataset.projectTemplate)));
-  $('#mediaSearch')?.addEventListener('input',filterMedia);
   document.querySelectorAll('[data-transition]').forEach(b=>b.addEventListener('click',()=>mutateSelected(c=>{c.transitionIn={id:b.dataset.transition};return c},`Transizione ${b.dataset.transition}`)));
   $('#transitionOutBtn')?.addEventListener('click',()=>mutateSelected(c=>{c.transitionOut={id:'fade',out:true};return c},'Fade out'));
   $('#addTransformKeyframeBtn')?.addEventListener('click',addTransformKeyframe);
@@ -42,7 +41,6 @@ function injectLibraries(){
   const strip=$('#stickerStrip');for(const sticker of EXTRA_STICKERS){const b=document.createElement('button');b.textContent=sticker;b.title=`Sticker ${sticker}`;b.addEventListener('click',()=>addDirectGraphic(createGraphicSpec('sticker',{text:sticker}),`Sticker ${sticker}`,3,'pop'));strip?.append(b)}
   const grid=document.querySelector('.graphic-grid');for(const item of EXTRA_GRAPHICS){const b=document.createElement('button');b.textContent=item.label;b.addEventListener('click',()=>addDirectGraphic(item.graphic,item.name,4,item.motion));grid?.append(b)}
 }
-function filterMedia(){const q=String($('#mediaSearch')?.value||'').trim().toLowerCase();document.querySelectorAll('#mediaList .media-item').forEach(el=>{el.hidden=!!q&&!el.textContent.toLowerCase().includes(q)})}
 async function applyTemplate(id){const p=applyProjectTemplate(await freshProject(),id);await saveReload(p,`Template ${id} applicato`)}
 async function addDirectGraphic(graphic,name,duration=4,motionPreset='fade'){const project=await freshProject();let track=project.tracks.find(t=>t.id==='graphics-pro');if(!track){track={id:'graphics-pro',name:'Grafica Pro',kind:'visual',clips:[]};project.tracks.push(track)}const id=crypto.randomUUID(),start=Number($('#playhead')?.value)||0,motion=applyMotionPreset({},motionPreset).motion,p=addClip(project,'graphics-pro',{id,sourceId:`graphic:${id}`,sourceName:'graphic.png',name,type:graphic.type==='sticker'?'sticker':'text',start,in:0,out:duration,duration,graphic,motion});await saveReload(p,`${name} aggiunto`)}
 

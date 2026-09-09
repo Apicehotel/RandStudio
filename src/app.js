@@ -25,6 +25,8 @@ let selected = null;
 let currentTime = 0;
 let playing = false;
 let raf = null;
+let mediaTypeFilter = '';
+let mediaQuery = '';
 const pxPerSecond = 80;
 
 const ui = {
@@ -32,6 +34,8 @@ const ui = {
 };
 
 const gpuRenderer = new WebGPUEffectsRenderer(ui.canvas);
+const appShell = $('.app-shell');
+if (appShell) appShell.inert = true;
 
 export function getProjectSnapshot() { return structuredClone(store.value); }
 export function getSelectedClip() {
@@ -41,6 +45,17 @@ export function getSelectedClip() {
 }
 export function getCurrentTime() { return currentTime; }
 export function getMediaSnapshot() { return new Map(media); }
+export async function registerMedia(item, { persist = true } = {}) {
+  if (!item?.id || !item.file) throw new Error('Media incompleto');
+  const previous = media.get(item.id);
+  if (previous?.url && previous.url !== item.url) URL.revokeObjectURL(previous.url);
+  const normalized = { ...item, url: item.type === 'lut' ? '' : item.url || URL.createObjectURL(item.file) };
+  media.set(normalized.id, normalized);
+  if (persist) await db.saveMedia(normalized);
+  renderMedia();
+  document.dispatchEvent(new CustomEvent('randstudio:media-change'));
+  return normalized;
+}
 export async function replaceProject(project, message = 'Progetto aggiornato') {
   const errors = validateProject(project);
   if (errors.length) throw new Error(errors.join('; '));
@@ -91,9 +106,10 @@ ui.whisperEndpoint.addEventListener('change', () => localStorage.setItem('randst
 
 document.querySelectorAll('.tabs .tab').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.tabs .tab').forEach((item) => item.classList.toggle('active', item === button));
-  const type = ({ Tutti: '', Video: 'video', Immagini: 'image', Audio: 'audio', LUT: 'lut' })[button.textContent.trim()] ?? '';
-  document.querySelectorAll('#mediaList .media-item').forEach((item) => { item.hidden = !!type && item.dataset.mediaType !== type; });
+  mediaTypeFilter = ({ Tutti: '', Video: 'video', Immagini: 'image', Audio: 'audio', LUT: 'lut' })[button.textContent.trim()] ?? '';
+  applyMediaFilters();
 }));
+$('#mediaSearch')?.addEventListener('input', (event) => { mediaQuery = event.target.value.trim().toLowerCase(); applyMediaFilters(); });
 document.querySelectorAll('.rail nav .rail-item').forEach((button) => button.addEventListener('click', () => {
   document.querySelectorAll('.rail nav .rail-item').forEach((item) => item.classList.toggle('active', item === button));
   const label = button.textContent.trim();
@@ -135,7 +151,8 @@ function renderClip(track, clip) { const el = document.createElement('div'); el.
 
 function beginDrag(event, el, trackId, clipId, start) { if (event.button !== 0) return; const origin = event.clientX; el.setPointerCapture(event.pointerId); const move = (e) => { el.style.left = `${Math.max(0, start + (e.clientX - origin) / pxPerSecond) * pxPerSecond}px`; }; const end = (e) => { el.releasePointerCapture?.(e.pointerId); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', end); commit(moveClip(store.value, trackId, clipId, round2(Math.max(0, start + (e.clientX - origin) / pxPerSecond)))); }; el.addEventListener('pointermove', move); el.addEventListener('pointerup', end); }
 
-function renderMedia() { ui.mediaList.innerHTML = ''; for (const item of media.values()) { if (item.generated) continue; const div = document.createElement('div'); div.className = 'media-item'; div.dataset.mediaType = item.type; const icon = item.type === 'video' ? '▶' : item.type === 'audio' ? '♫' : item.type === 'lut' ? '◫' : '▧'; div.innerHTML = `<div class="media-thumb">${icon}</div><div class="media-meta"><strong>${escapeHtml(item.name)}</strong><span>${item.type}${item.type === 'lut' ? ` · ${item.lut?.size || '?'}³` : ` · ${(item.duration || 0).toFixed(1)} s`}</span></div>`; const actions = document.createElement('div'); actions.className = 'media-actions'; const main = document.createElement('button'); main.textContent = item.type === 'lut' ? 'LUT' : '+'; main.onclick = () => item.type === 'lut' ? applyLUT(item.id) : addMediaToTimeline(item.id); actions.append(main); div.append(actions); ui.mediaList.append(div); } }
+function renderMedia() { ui.mediaList.innerHTML = ''; for (const item of media.values()) { if (item.generated) continue; const div = document.createElement('div'); div.className = 'media-item'; div.dataset.mediaType = item.type; const icon = item.type === 'video' ? '▶' : item.type === 'audio' ? '♫' : item.type === 'lut' ? '◫' : '▧'; div.innerHTML = `<div class="media-thumb">${icon}</div><div class="media-meta"><strong>${escapeHtml(item.name)}</strong><span>${item.type}${item.type === 'lut' ? ` · ${item.lut?.size || '?'}³` : ` · ${(item.duration || 0).toFixed(1)} s`}</span></div>`; const actions = document.createElement('div'); actions.className = 'media-actions'; const main = document.createElement('button'); main.textContent = item.type === 'lut' ? 'LUT' : '+'; main.onclick = () => item.type === 'lut' ? applyLUT(item.id) : addMediaToTimeline(item.id); actions.append(main); div.append(actions); ui.mediaList.append(div); } applyMediaFilters(); }
+function applyMediaFilters() { document.querySelectorAll('#mediaList .media-item').forEach((item) => { item.hidden = (!!mediaTypeFilter && item.dataset.mediaType !== mediaTypeFilter) || (!!mediaQuery && !item.textContent.toLowerCase().includes(mediaQuery)); }); }
 
 function renderInspector() { const f = selected && findClip(store.value, selected.trackId, selected.clipId); ui.inspector.hidden = !f; ui.inspectorEmpty.hidden = !!f; ui.graphicInspector.hidden = !f || !isGraphicClip(f.clip) || f.clip.type === 'light-leak'; if (!f) { if (ui.speedRampStatus) ui.speedRampStatus.textContent = 'Nessuna curva velocità.'; return; } const c = f.clip; ui.clipName.value = c.name; ui.clipStart.value = c.start.toFixed(2); ui.clipDuration.value = (c.end - c.start).toFixed(2); ui.clipIn.value = c.in.toFixed(2); ui.clipOut.value = c.out.toFixed(2); ui.clipScale.value = c.transform?.scale ?? 1; ui.clipRotation.value = c.transform?.rotation ?? 0; if (isGraphicClip(c) && c.type !== 'light-leak') { ui.graphicText.value = c.graphic?.text || ''; ui.graphicSubtitle.value = c.graphic?.subtitle || ''; ui.graphicFontSize.value = c.graphic?.fontSize || 72; ui.graphicColor.value = colorHex(c.graphic?.color); ui.graphicSubtitleRow.hidden = c.type !== 'lower-third'; } const b = c.effects?.find((e) => e.id === 'brightness'), local = Math.max(0, currentTime - c.start); ui.brightness.value = b ? evaluateEffect(b, local).params.amount : 1; ui.keyframeStatus.textContent = `Keyframe luminosità: ${b?.keyframes?.amount?.length || 0}${c.lutSourceId ? ` · LUT: ${media.get(c.lutSourceId)?.name || 'mancante'}` : ''}`; if (ui.speedRampStatus) ui.speedRampStatus.textContent = c.speedRamp ? `Curva: ${c.speedRamp.preset} · ${c.speedRamp.samples} segmenti render` : 'Nessuna curva velocità.'; if (c.speedRamp?.points?.length >= 2) { ui.speedRampStart.value = c.speedRamp.points[0].rate; ui.speedRampMid.value = rateAt(c.speedRamp, .5).toFixed(2); ui.speedRampEnd.value = c.speedRamp.points.at(-1).rate; } document.querySelectorAll('[data-effect-preset]').forEach((btn) => btn.classList.toggle('selected-preset', btn.dataset.effectPreset === c.effectPreset)); document.querySelectorAll('[data-motion-preset]').forEach((btn) => btn.classList.toggle('selected-preset', btn.dataset.motionPreset === (c.motion?.preset || 'none'))); document.querySelectorAll('[data-speed-ramp]').forEach((btn) => btn.classList.toggle('selected-preset', btn.dataset.speedRamp === c.speedRamp?.preset)); }
 
@@ -212,6 +229,13 @@ window.addEventListener('beforeunload', () => { for (const item of media.values(
 ui.gpuStatus.textContent = WebGPUEffectsRenderer.supported() ? 'GPU: WebGPU disponibile' : 'GPU: fallback browser';
 render(); renderMedia();
 export const appReady = restoreSession().then(() => {
+  if (appShell) appShell.inert = false;
   document.dispatchEvent(new CustomEvent('randstudio:ready', { detail: { project: getProjectSnapshot() } }));
   return getProjectSnapshot();
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const message = event.reason?.message || String(event.reason || 'Errore inatteso');
+  status(`Operazione non riuscita: ${message}`);
+  console.error('RandStudio operation', event.reason);
 });
