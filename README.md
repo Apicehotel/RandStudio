@@ -1,6 +1,6 @@
 # RandStudio
 
-RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering e AI.
+RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, persistenza e AI.
 
 ## Point 1 — motore editor
 - timeline visual/audio multi-track
@@ -11,64 +11,121 @@ RandStudio è uno studio locale-first per foto e video. Il progetto usa un docum
 - CI GitHub Actions
 
 ## Point 2 — AI Lab
-
-L'AI non è incorporata nell'editor: passa attraverso adapter e job. Questo evita di legare RandStudio a un singolo modello o provider.
+L'AI passa attraverso adapter, registry provider e job; non viene hard-coded nell'editor.
 
 ```text
-UI / futuro AI Lab
-       |
-       v
-AIJobQueue ---- ComfyUIAdapter ---- ComfyUI locale
-       |                                |
-       |                         Wan2.2 Fun Camera
-       |                                |
-       +--------- risultato ------------+
-                    |
-                    v
-              Composition JSON
-                    |
-                    v
-                 Timeline
+UI -> AI Provider Registry
+      |              |
+      v              v
+  ComfyUI locale   AI Gateway remoto
+      |              |
+      +------ job ----+
+             |
+             v
+      Composition JSON -> Timeline
 ```
 
 ### Implementato
-- `ComfyUIAdapter`: health/system stats, object info, queue, history, prompt enqueue, interrupt e URL output
-- `AIJobQueue`: queued/running/completed/failed/cancelled, progress e output
+- `ComfyUIAdapter`: system stats, object info, queue, history, enqueue, interrupt e URL output
+- `AIJobQueue`: queued/running/completed/failed/cancelled
+- `AIProviderRegistry`: provider intercambiabili
+- `GatewayProvider`: endpoint remoto senza API key nel client
 - contratto `randstudio.wan-camera/v1`
-- preset Drone: Reveal (Zoom Out), Rise (Pan Up), Approach (Zoom In)
-- validazione motion, dimensioni, frame length e speed
-- binding semantico dei parametri Wan a workflow API JSON: nessun node-id Wan hard-coded nel core
-- reinserimento degli output AI come clip `ai-generated` nella timeline visuale
-- test automatici del lifecycle job, binding Wan e round-trip output -> timeline
+- preset Drone Reveal / Rise / Approach
+- binding semantico dei workflow Wan, nessun node-id fragile nel core
+- output AI reinseribile come clip `ai-generated`
 
-### Perché i node-id Wan NON sono hard-coded
-I workflow ComfyUI possono cambiare tra template/versioni. RandStudio conserva un mapping di binding separato (`prompt`, `motion`, `width`, `height`, `length`, `speed`, opzionale `seed`) e applica i valori a un workflow API JSON fornito/configurato. Così un aggiornamento del template non richiede di riscrivere il core.
+Per generare realmente serve almeno un runtime esterno raggiungibile: ComfyUI/Wan locale oppure un gateway AI remoto. Il repository non incorpora pesi multi-GB né credenziali.
 
-## Wan2.2 Fun Camera
-Il workflow ufficiale ComfyUI supporta `Static`, `Pan Up`, `Pan Down`, `Pan Left`, `Pan Right`, `Zoom In` e `Zoom Out`; RandStudio espone lo stesso contratto. Il preset **Drone View / Reveal** usa `Zoom Out` reale del modello, non un filtro CSS.
+## Point 3 — Rand Design System + Effects Engine
 
-### Requisiti runtime per generare davvero
-RandStudio non scarica automaticamente modelli multi-GB. Sul computer/GPU che esegue AI Lab servono:
-1. ComfyUI aggiornato e raggiungibile (default adapter `http://127.0.0.1:8188`)
-2. workflow API JSON Wan2.2 Fun Camera
-3. modelli Wan Fun Camera high-noise/low-noise, VAE e text encoder richiesti dal workflow
-4. eventuali LoRA Lightning se si vuole la modalità accelerata
+### Rand Design System v1
+- app shell editor con rail, media library, preview, inspector e timeline
+- palette dark ad alto contrasto con accent viola/blu
+- token CSS centralizzati
+- safe-area iOS
+- responsive desktop / tablet / smartphone
+- modalità **Grande** persistente
 
-I modelli restano fuori dal repository Git.
+### Effects Engine
+Gli effetti sono dati strutturati sulla clip.
+
+```text
+Clip.effects
+   |
+   +--> preview -> WebGPU quando disponibile
+   |             -> browser fallback
+   |             -> LUT CPU preview
+   |
+   +--> export  -> FFmpeg
+   |             -> LUT3D
+   |             -> keyframe expressions
+   |
+   +--> futuro  -> Rust/WASM opzionale
+```
+
+Preset inclusi: Clean, Cinema, Vivid, B/N, VHS, NTSC.
+
+AiyaEffectsIOS, VideoBeautify e `ntsc-rs` sono usati come riferimenti architetturali. Non vengono copiati SDK iOS, asset proprietari o codice con licenza incerta.
+
+## Point 4 — Advanced Runtime completato
+
+### WebGPU
+`src/effects/webgpu-renderer.js` implementa una pipeline WebGPU per preview real-time di luminosità, contrasto, saturazione e grayscale. Quando WebGPU non è disponibile RandStudio usa il renderer browser esistente.
+
+### LUT `.cube`
+- import `.cube` dalla Media Library
+- parser `LUT_3D_SIZE`, `DOMAIN_MIN/MAX`, samples
+- validazione dimensione e campioni
+- preview LUT su canvas
+- export FFmpeg con `lut3d`
+- LUT salvata come asset persistente e collegabile alla clip
+
+### Keyframe
+- keyframe numerici versionabili nei singoli effetti
+- interpolazione lineare nella preview
+- luminosità animabile direttamente dall'Inspector
+- compiler FFmpeg con espressioni `eval=frame` per brightness / contrast / saturation e supporto grayscale
+- struttura generica pronta per estendere altri parametri
+
+### IndexedDB / relink
+`src/persistence/indexeddb.js` salva:
+- progetto più recente
+- blob originali media
+- LUT
+- metadati di relink
+
+All'avvio RandStudio ripristina sessione e asset locali. Il relink dispone di scoring su nome, size, lastModified e MIME.
+
+### Provider AI
+`src/ai/provider-registry.js` separa UI e provider. Sono disponibili:
+- `ComfyUIProvider` per runtime locale
+- `GatewayProvider` per runtime remoto/self-hosted
+
+Il gateway viene configurato dalla UI e salvato in `localStorage`. Nessuna chiave privata viene salvata nel client.
 
 ## Architettura
 ```text
 src/
 ├── app.js
 ├── styles.css
+├── advanced.css
 ├── core/
 │   ├── composition.js
 │   ├── history.js
 │   └── ffmpeg-compiler.js
+├── effects/
+│   ├── effects-engine.js
+│   ├── keyframes.js
+│   ├── lut.js
+│   └── webgpu-renderer.js
+├── persistence/
+│   └── indexeddb.js
 ├── ai/
 │   ├── job-queue.js
 │   ├── wan-camera.js
-│   └── result-import.js
+│   ├── result-import.js
+│   └── provider-registry.js
 └── adapters/
     ├── ffmpeg-wasm.js
     └── comfyui.js
@@ -83,24 +140,28 @@ npm run check
 npm run build
 ```
 
-## Dipendenze
+## Dipendenze runtime browser
 - `@ffmpeg/ffmpeg` 0.12.15
 - `@ffmpeg/util` 0.12.2
+- WebGPU opzionale, rilevato a runtime
+- IndexedDB nativo browser
 
-ComfyUI/Wan sono servizi/modelli locali esterni e non vengono inclusi come dipendenze npm.
-
-## Sicurezza
+## Sicurezza e workflow
 - nessuna API key nel client
 - nessun upload automatico
-- endpoint ComfyUI configurabile; non esporre una istanza locale direttamente a Internet
-- branch feature + Pull Request obbligatori
+- non esporre ComfyUI locale direttamente a Internet
+- ogni modifica agente: branch dedicata + Pull Request
 - nessun agente scrive o deploya direttamente su `main`
 
-## Limitazioni / prossimo blocco
-- manca ancora il pannello visuale AI Lab che usa questi moduli
-- il workflow API JSON e i binding Wan devono essere importati/configurati dall'utente finché non aggiungiamo un registry versionato
-- persistenza IndexedDB/relink media ancora da completare
-- outpainting, extension, upscale e background removal saranno provider/workflow aggiuntivi sopra la stessa queue
+## Cosa resta davvero
+Non restano più i 5 blocchi strutturali precedenti. Le prossime evoluzioni sono miglioramenti di qualità/prodotto, non debiti architetturali obbligatori:
+- maschere e object tracking
+- stabilizzazione
+- object/background removal
+- upscale
+- più parametri keyframabili
+- renderer analogico Rust/WASM opzionale
+- workflow AI reali preconfigurati quando viene scelto il runtime/provider definitivo
 
 ## Licenze
-RandStudio resta senza licenza open-source finché non ne viene scelta una. Wan2.2 Fun Camera è documentato da ComfyUI come Apache-2.0; verificare comunque le licenze di ogni modello/workflow e delle build FFmpeg prima della distribuzione commerciale/pubblica.
+RandStudio resta senza licenza open-source finché non ne viene scelta una. Prima di distribuire pubblicamente verificare separatamente licenze di FFmpeg, modelli AI, LUT, font, asset e ogni eventuale codice esterno incorporato.
