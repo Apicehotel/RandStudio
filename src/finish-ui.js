@@ -3,7 +3,8 @@ import{addClip}from'./core/composition.js';
 import{applyProjectTemplate}from'./core/project-templates.js';
 import{createKineticText,materializeKineticText}from'./graphics/kinetic-text.js';
 import{applyMotionPreset,evaluateMotion}from'./graphics/motion-engine.js';
-import{renderGraphicBlob,isGraphicClip}from'./graphics/overlay-engine.js';
+import{renderGraphicBlob,isGraphicClip,createGraphicSpec}from'./graphics/overlay-engine.js';
+import{applyPreset,EFFECT_PRESETS}from'./effects/effects-engine.js';
 import{setTransformKeyframe,evaluateTransform}from'./core/transform-keyframes.js';
 import{normalizeAudioSpec}from'./audio/audio-engine.js';
 import{createVisionJob,GatewayVisionProvider,createTrack,trackAt,createRectMask}from'./vision/vision-engine.js';
@@ -11,9 +12,17 @@ import{activeVisualLayers}from'./preview/composite-preview.js';
 import{timelineToSource}from'./core/speed-ramp.js';
 
 const db=new RandStudioDB(),$=s=>document.querySelector(s);let snapshot=null,mediaRows=new Map(),lastTime=-1,lastRefresh=0,compositeEnabled=true,layerRoot=null;const urls=new Map(),layerEls=new Map();
+const EXTRA_STICKERS=['💫','⚡','🎬','🎥','🎵','🎶','📸','📌','📣','💡','🚀','🏆','🎂','🎈','🎁','🍾','🥂','🍹','☕','🍕','🌟','💎','❗','❓','➡️','⬆️','⬇️','✅','❌','💯'];
+const EXTRA_GRAPHICS=[
+  {label:'Neon',name:'Titolo Neon',graphic:createGraphicSpec('text',{text:'NEON',fontSize:82,fontWeight:900,color:'#ffffff',background:'rgba(124,92,255,.28)',padding:24}),motion:'pop'},
+  {label:'Quote',name:'Citazione',graphic:createGraphicSpec('text',{text:'“La tua frase”',fontSize:58,fontWeight:800,color:'#ffffff',background:'rgba(8,11,18,.72)',padding:28}),motion:'fade'},
+  {label:'CTA',name:'Call to action',graphic:createGraphicSpec('text',{text:'SCOPRI DI PIÙ',fontSize:58,fontWeight:900,color:'#ffffff',background:'rgba(124,92,255,.92)',padding:26}),motion:'slideUp'},
+  {label:'Location',name:'Location',graphic:createGraphicSpec('text',{text:'📍 LOCATION',fontSize:50,fontWeight:850,color:'#ffffff',background:'rgba(8,11,18,.76)',padding:22}),motion:'slideLeft'},
+  {label:'Price',name:'Prezzo',graphic:createGraphicSpec('text',{text:'€ 99',fontSize:96,fontWeight:950,color:'#ffffff',background:'rgba(8,11,18,.7)',padding:24}),motion:'bounce'},
+];
 
 boot();
-async function boot(){try{await refreshData();wire();await initComposite();}catch(e){console.warn('RandStudio finish UI',e)}}
+async function boot(){try{await refreshData();wire();injectLibraries();await initComposite();}catch(e){console.warn('RandStudio finish UI',e)}}
 function wire(){
   $('#addKineticBtn')?.addEventListener('click',addKinetic);
   document.querySelectorAll('[data-project-template]').forEach(b=>b.addEventListener('click',()=>applyTemplate(b.dataset.projectTemplate)));
@@ -28,8 +37,14 @@ function wire(){
   $('#sendVisionJobsBtn')?.addEventListener('click',sendVisionJobs);
   $('#toggleCompositeBtn')?.addEventListener('click',()=>{compositeEnabled=!compositeEnabled;$('#toggleCompositeBtn').textContent=compositeEnabled?'Preview composita: ON':'Preview composita: OFF';if(!compositeEnabled)clearLayers()});
 }
+function injectLibraries(){
+  const fx=$('#effectPresets');for(const id of['tealOrange','warmFilm','coolFilm','vintage','hdr','softFilm','pixel','fisheye','edge','greenScreen'])if(EFFECT_PRESETS[id]&&!fx?.querySelector(`[data-finish-effect="${id}"]`)){const b=document.createElement('button');b.dataset.finishEffect=id;b.textContent=EFFECT_PRESETS[id].name;b.addEventListener('click',()=>mutateSelected(c=>({...applyPreset(c,id),effectPreset:id}),`Preset ${EFFECT_PRESETS[id].name}`));fx?.append(b)}
+  const strip=$('#stickerStrip');for(const sticker of EXTRA_STICKERS){const b=document.createElement('button');b.textContent=sticker;b.title=`Sticker ${sticker}`;b.addEventListener('click',()=>addDirectGraphic(createGraphicSpec('sticker',{text:sticker}),`Sticker ${sticker}`,3,'pop'));strip?.append(b)}
+  const grid=document.querySelector('.graphic-grid');for(const item of EXTRA_GRAPHICS){const b=document.createElement('button');b.textContent=item.label;b.addEventListener('click',()=>addDirectGraphic(item.graphic,item.name,4,item.motion));grid?.append(b)}
+}
 function filterMedia(){const q=String($('#mediaSearch')?.value||'').trim().toLowerCase();document.querySelectorAll('#mediaList .media-item').forEach(el=>{el.hidden=!!q&&!el.textContent.toLowerCase().includes(q)})}
 async function applyTemplate(id){const p=applyProjectTemplate(await freshProject(),id);await saveReload(p,`Template ${id} applicato`)}
+async function addDirectGraphic(graphic,name,duration=4,motionPreset='fade'){const project=await freshProject();let track=project.tracks.find(t=>t.id==='graphics-pro');if(!track){track={id:'graphics-pro',name:'Grafica Pro',kind:'visual',clips:[]};project.tracks.push(track)}const id=crypto.randomUUID(),start=Number($('#playhead')?.value)||0,motion=applyMotionPreset({},motionPreset).motion,p=addClip(project,'graphics-pro',{id,sourceId:`graphic:${id}`,sourceName:'graphic.png',name,type:graphic.type==='sticker'?'sticker':'text',start,in:0,out:duration,duration,graphic,motion});await saveReload(p,`${name} aggiunto`)}
 
 async function addKinetic(){const text=$('#kineticText')?.value?.trim();if(!text)return note('Scrivi il testo kinetic.');const preset=$('#kineticPreset')?.value||'wordPop',project=await freshProject();let track=project.tracks.find(t=>t.id==='kinetic-text');if(!track){track={id:'kinetic-text',name:'Kinetic Text',kind:'visual',clips:[]};project.tracks.push(track)}const start=Number($('#playhead')?.value)||0,spec=createKineticText(text,preset),rows=materializeKineticText(spec,{start,graphic:{fontSize:Number($('#kineticSize')?.value)||72,color:$('#kineticColor')?.value||'#ffffff'}});let p=project;for(const row of rows){const id=crypto.randomUUID(),motion=applyMotionPreset({},row.motion).motion;p=addClip(p,'kinetic-text',{id,sourceId:`graphic:${id}`,sourceName:'kinetic.png',name:`Kinetic: ${row.active}`,type:'text',start:row.start,in:0,out:row.duration,duration:row.duration,graphic:row.graphic,motion,kinetic:spec})}await saveReload(p,`${rows.length} step kinetic creati`)}
 async function addTransformKeyframe(){const key=$('#transformKey')?.value||'x',value=Number($('#transformKeyValue')?.value),easing=$('#transformEasing')?.value||'easeInOut';await mutateSelected(c=>{const local=Math.max(0,(Number($('#playhead')?.value)||c.start)-c.start);return setTransformKeyframe(c,key,local,Number.isFinite(value)?value:0,easing)},`Keyframe ${key} aggiunto`)}
