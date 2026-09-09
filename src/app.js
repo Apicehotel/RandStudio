@@ -248,15 +248,21 @@ async function transcribeSelectedClip() {
     const registry = createTranscriptionRegistry({ gatewayEndpoint, whisperEndpoint });
     const providerId = gatewayEndpoint ? 'gateway-stt' : 'whispercpp';
     const transcript = await registry.transcribe(providerId, { file: item.file, language: ui.captionLanguage.value.trim() || 'auto', wordTimestamps: true });
-    const shifted = shiftTranscript(transcript, f.clip.start - f.clip.in / Math.max(.05, f.clip.playbackRate || 1), f.clip.playbackRate || 1);
-    await applyTranscriptToTimeline(shifted, ui.captionStyle.value);
-    captionStatus(`${shifted.segments.length} segmenti creati con ${providerId === 'whispercpp' ? 'Whisper.cpp locale' : 'AI Gateway STT'}.`);
+    const mapped = mapTranscriptToClip(transcript, f.clip);
+    await applyTranscriptToTimeline(mapped, ui.captionStyle.value);
+    captionStatus(`${mapped.segments.length} segmenti creati con ${providerId === 'whispercpp' ? 'Whisper.cpp locale' : 'AI Gateway STT'}.`);
   } catch (error) { captionStatus(`Trascrizione non riuscita: ${error.message}`); }
 }
 
-function shiftTranscript(transcript, offset = 0, playbackRate = 1) {
-  const t = normalizeTranscript(transcript), rate = Math.max(.05, Number(playbackRate) || 1);
-  return { ...t, segments: t.segments.map((s) => ({ ...s, start: offset + s.start / rate, end: offset + s.end / rate, words: (s.words || []).map((w) => ({ ...w, start: offset + w.start / rate, end: offset + w.end / rate })) })) };
+function mapTranscriptToClip(transcript, clip) {
+  const t = normalizeTranscript(transcript), rate = Math.max(.05, Number(clip.playbackRate) || 1), sourceIn = Math.max(0, Number(clip.in) || 0), sourceOut = Math.max(sourceIn, Number(clip.out) || sourceIn);
+  const segments = [];
+  for (const s of t.segments) {
+    const a = Math.max(sourceIn, s.start), b = Math.min(sourceOut, s.end); if (b <= a) continue;
+    const words = (s.words || []).filter((w) => w.end > sourceIn && w.start < sourceOut).map((w) => ({ ...w, start: clip.start + (Math.max(sourceIn, w.start) - sourceIn) / rate, end: clip.start + (Math.min(sourceOut, w.end) - sourceIn) / rate }));
+    segments.push({ ...s, start: clip.start + (a - sourceIn) / rate, end: clip.start + (b - sourceIn) / rate, words });
+  }
+  return { ...t, segments };
 }
 
 async function applyTranscriptToTimeline(transcript, styleId = 'social') {
@@ -325,7 +331,15 @@ async function persistProject() { try { await db.saveProject(store.value); ui.st
 async function hydrateGraphics() { for (const t of store.value.tracks || []) for (const c of t.clips || []) if (isGraphicClip(c)) await ensureGraphicMedia(c); }
 async function restoreSession() { try { const latest = await db.latestProject(), rows = await db.loadAllMedia(); for (const row of rows) { const file = globalThis.File ? new File([row.blob], row.name, { type: row.mime, lastModified: row.lastModified }) : row.blob, item = { id: row.id, file, type: row.type, name: row.name, duration: row.duration, virtualName: row.virtualName, url: row.type === 'lut' ? '' : URL.createObjectURL(file) }; if (row.type === 'lut') item.lut = parseCubeLUT(await row.blob.text(), row.name); media.set(item.id, item); } if (latest) store = new HistoryStore(latest); await hydrateGraphics(); ui.storageStatus.textContent = `Autosave: ${rows.length} asset ripristinati`; renderMedia(); render(); if (store.value.captionTranscript?.segments?.length) captionStatus(`${store.value.captionTranscript.segments.length} segmenti sottotitoli ripristinati.`); } catch (error) { ui.storageStatus.textContent = 'Autosave: nuovo progetto'; console.warn(error); } }
 
-async function testAIProviders() { const gateway = ui.gateway.value.trim(); try { await comfy.systemStats(); ui.aiStatus.textContent = 'ComfyUI locale connesso'; return; } catch {} if (gateway) { try { const r = await fetch(`${gateway.replace(/\/$/, '')}/health`); if (r.ok) { ui.aiStatus.textContent = 'AI Gateway connesso'; return; } } catch {} ui.aiStatus.textContent = 'Nessun runtime AI raggiungibile; editor ed effetti restano operativi.'; }
+async function testAIProviders() {
+  const gateway = ui.gateway.value.trim();
+  try { await comfy.systemStats(); ui.aiStatus.textContent = 'ComfyUI locale connesso'; return; } catch {}
+  if (gateway) {
+    try { const r = await fetch(`${gateway.replace(/\/$/, '')}/health`); if (r.ok) { ui.aiStatus.textContent = 'AI Gateway connesso'; return; } } catch {}
+  }
+  ui.aiStatus.textContent = 'Nessun runtime AI raggiungibile; editor ed effetti restano operativi.';
+}
+
 async function runAI(motion) { const request = createWanCameraRequest({ prompt: 'Cinematic, realistic, stable motion, preserve subject and scene', motion, width: 640, height: 640, length: 81, speed: 1 }), gateway = ui.gateway.value.trim(); if (gateway) { try { const registry = createDefaultRegistry({ gatewayEndpoint: gateway }), result = await registry.generate('gateway', { type: 'wan-camera', request, projectId: store.value.id, clipId: selected?.clipId ?? null }); ui.aiStatus.textContent = `Job AI inviato: ${result.jobId || result.id || 'accettato'}`; return; } catch (error) { ui.aiStatus.textContent = `Gateway AI: ${error.message}`; return; } } try { await comfy.systemStats(); ui.aiStatus.textContent = `ComfyUI online. Movimento ${motion} pronto.`; } catch { ui.aiStatus.textContent = 'Configura un AI Gateway oppure avvia ComfyUI locale.'; } }
 
 function status(text) { ui.engine.textContent = text; }
