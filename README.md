@@ -1,6 +1,6 @@
 # RandStudio
 
-RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti e AI.
+RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, persistenza e AI.
 
 ## Point 1 — motore editor
 - timeline visual/audio multi-track
@@ -11,91 +11,121 @@ RandStudio è uno studio locale-first per foto e video. Il progetto usa un docum
 - CI GitHub Actions
 
 ## Point 2 — AI Lab
-L'AI passa attraverso adapter e job, non viene hard-coded nell'editor.
+L'AI passa attraverso adapter, registry provider e job; non viene hard-coded nell'editor.
 
 ```text
-UI -> AIJobQueue -> ComfyUIAdapter -> Wan2.2 Fun Camera
-                         |
-                         v
-                  Composition JSON -> Timeline
+UI -> AI Provider Registry
+      |              |
+      v              v
+  ComfyUI locale   AI Gateway remoto
+      |              |
+      +------ job ----+
+             |
+             v
+      Composition JSON -> Timeline
 ```
 
 ### Implementato
 - `ComfyUIAdapter`: system stats, object info, queue, history, enqueue, interrupt e URL output
 - `AIJobQueue`: queued/running/completed/failed/cancelled
+- `AIProviderRegistry`: provider intercambiabili
+- `GatewayProvider`: endpoint remoto senza API key nel client
 - contratto `randstudio.wan-camera/v1`
 - preset Drone Reveal / Rise / Approach
 - binding semantico dei workflow Wan, nessun node-id fragile nel core
 - output AI reinseribile come clip `ai-generated`
 
+Per generare realmente serve almeno un runtime esterno raggiungibile: ComfyUI/Wan locale oppure un gateway AI remoto. Il repository non incorpora pesi multi-GB né credenziali.
+
 ## Point 3 — Rand Design System + Effects Engine
 
 ### Rand Design System v1
-L'interfaccia usa un set unico di token e pattern per evitare pagine disegnate ogni volta da zero.
-
 - app shell editor con rail, media library, preview, inspector e timeline
 - palette dark ad alto contrasto con accent viola/blu
-- spacing, radius, surface, border, semantic color e control-size centralizzati in CSS custom properties
+- token CSS centralizzati
 - safe-area iOS
 - responsive desktop / tablet / smartphone
-- modalità **Grande** persistente via `localStorage`
-- controlli e gerarchia visiva coerenti
-- nessuna modifica al contratto Composition JSON per ragioni puramente grafiche
+- modalità **Grande** persistente
 
-### Effects Engine v1
-Gli effetti sono dati strutturati sulla clip, non CSS sparso nell'interfaccia.
+### Effects Engine
+Gli effetti sono dati strutturati sulla clip.
 
 ```text
 Clip.effects
    |
-   +--> previewRenderer -> browser/CSS oggi, WebGPU domani
+   +--> preview -> WebGPU quando disponibile
+   |             -> browser fallback
+   |             -> LUT CPU preview
    |
-   +--> exportRenderer  -> FFmpeg oggi, Rust/WASM opzionale domani
+   +--> export  -> FFmpeg
+   |             -> LUT3D
+   |             -> keyframe expressions
+   |
+   +--> futuro  -> Rust/WASM opzionale
 ```
 
-Ogni effect definition contiene:
-- `id`
-- nome/categoria
-- schema parametri con min/max/default
-- renderer preview
-- renderer FFmpeg
+Preset inclusi: Clean, Cinema, Vivid, B/N, VHS, NTSC.
 
-Preset inclusi:
-- Clean
-- Cinema
-- Vivid
-- B/N
-- VHS
-- NTSC
+AiyaEffectsIOS, VideoBeautify e `ntsc-rs` sono usati come riferimenti architetturali. Non vengono copiati SDK iOS, asset proprietari o codice con licenza incerta.
 
-Gli effetti analogici sono ispirati ai pattern di `ntsc-rs`; VideoBeautify e AiyaEffectsIOS sono stati usati solo come riferimenti architetturali per temi/pipeline. Non vengono copiate dipendenze iOS, SDK proprietari o asset con licenza incerta.
+## Point 4 — Advanced Runtime completato
 
-### Perché non integriamo direttamente Aiya / VideoBeautify
-Sono repository iOS/Objective-C vecchi o legati a SDK/asset specifici. RandStudio prende i concetti utili — pipeline effetti, temi, overlay, beauty — e li implementa in un contratto web-first indipendente.
+### WebGPU
+`src/effects/webgpu-renderer.js` implementa una pipeline WebGPU per preview real-time di luminosità, contrasto, saturazione e grayscale. Quando WebGPU non è disponibile RandStudio usa il renderer browser esistente.
 
-### Perché `ntsc-rs` è interessante
-`ntsc-rs` dimostra che gli effetti analogici complessi possono vivere in un motore separato ad alte prestazioni. RandStudio parte con equivalenti preview/FFmpeg e mantiene aperta una futura integrazione Rust/WASM senza legare il progetto a una sola implementazione.
+### LUT `.cube`
+- import `.cube` dalla Media Library
+- parser `LUT_3D_SIZE`, `DOMAIN_MIN/MAX`, samples
+- validazione dimensione e campioni
+- preview LUT su canvas
+- export FFmpeg con `lut3d`
+- LUT salvata come asset persistente e collegabile alla clip
 
-## Wan2.2 Fun Camera
-Supportati dal contratto: `Static`, `Pan Up`, `Pan Down`, `Pan Left`, `Pan Right`, `Zoom In`, `Zoom Out`.
+### Keyframe
+- keyframe numerici versionabili nei singoli effetti
+- interpolazione lineare nella preview
+- luminosità animabile direttamente dall'Inspector
+- compiler FFmpeg con espressioni `eval=frame` per brightness / contrast / saturation e supporto grayscale
+- struttura generica pronta per estendere altri parametri
 
-Per generazione reale servono ComfyUI + workflow/modelli Wan sul runtime AI; i pesi restano fuori dal repository.
+### IndexedDB / relink
+`src/persistence/indexeddb.js` salva:
+- progetto più recente
+- blob originali media
+- LUT
+- metadati di relink
+
+All'avvio RandStudio ripristina sessione e asset locali. Il relink dispone di scoring su nome, size, lastModified e MIME.
+
+### Provider AI
+`src/ai/provider-registry.js` separa UI e provider. Sono disponibili:
+- `ComfyUIProvider` per runtime locale
+- `GatewayProvider` per runtime remoto/self-hosted
+
+Il gateway viene configurato dalla UI e salvato in `localStorage`. Nessuna chiave privata viene salvata nel client.
 
 ## Architettura
 ```text
 src/
 ├── app.js
 ├── styles.css
+├── advanced.css
 ├── core/
 │   ├── composition.js
 │   ├── history.js
 │   └── ffmpeg-compiler.js
 ├── effects/
-│   └── effects-engine.js
+│   ├── effects-engine.js
+│   ├── keyframes.js
+│   ├── lut.js
+│   └── webgpu-renderer.js
+├── persistence/
+│   └── indexeddb.js
 ├── ai/
 │   ├── job-queue.js
 │   ├── wan-camera.js
-│   └── result-import.js
+│   ├── result-import.js
+│   └── provider-registry.js
 └── adapters/
     ├── ffmpeg-wasm.js
     └── comfyui.js
@@ -113,8 +143,8 @@ npm run build
 ## Dipendenze runtime browser
 - `@ffmpeg/ffmpeg` 0.12.15
 - `@ffmpeg/util` 0.12.2
-
-ComfyUI/Wan sono runtime esterni opzionali.
+- WebGPU opzionale, rilevato a runtime
+- IndexedDB nativo browser
 
 ## Sicurezza e workflow
 - nessuna API key nel client
@@ -123,14 +153,15 @@ ComfyUI/Wan sono runtime esterni opzionali.
 - ogni modifica agente: branch dedicata + Pull Request
 - nessun agente scrive o deploya direttamente su `main`
 
-## Limitazioni note / prossimo blocco
-- media relinking e persistenza IndexedDB
-- preview effetti analogici complessi oggi è intenzionalmente approssimata; FFmpeg è l'output autorevole
-- WebGPU/shader renderer per preview avanzata
-- LUT importabili
-- maschere, keyframe e automation parametri
-- stabilizzazione, object removal, background removal e upscale come provider/workflow
-- registry versionato dei workflow AI
+## Cosa resta davvero
+Non restano più i 5 blocchi strutturali precedenti. Le prossime evoluzioni sono miglioramenti di qualità/prodotto, non debiti architetturali obbligatori:
+- maschere e object tracking
+- stabilizzazione
+- object/background removal
+- upscale
+- più parametri keyframabili
+- renderer analogico Rust/WASM opzionale
+- workflow AI reali preconfigurati quando viene scelto il runtime/provider definitivo
 
 ## Licenze
 RandStudio resta senza licenza open-source finché non ne viene scelta una. Prima di distribuire pubblicamente verificare separatamente licenze di FFmpeg, modelli AI, LUT, font, asset e ogni eventuale codice esterno incorporato.
