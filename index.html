@@ -2,21 +2,64 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#101217" />
-  <title>RandStudio — Timeline Studio</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#080b12" />
+  <meta name="color-scheme" content="dark" />
+  <title>RandStudio — Create. Edit. Transform.</title>
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
   <div class="app-shell">
+    <aside class="rail" aria-label="Navigazione principale">
+      <div class="brand-mark">R</div>
+      <nav>
+        <button class="rail-item active" title="Editor">✦<span>Editor</span></button>
+        <button class="rail-item" title="AI Lab">⌁<span>AI Lab</span></button>
+        <button class="rail-item" title="Media">▦<span>Media</span></button>
+        <button class="rail-item" title="Effetti">◈<span>Effetti</span></button>
+        <button class="rail-item" title="Progetti">□<span>Progetti</span></button>
+      </nav>
+      <button id="largeModeBtn" class="rail-item accessibility" title="Modalità Grande">A+<span>Grande</span></button>
+    </aside>
+
     <header class="topbar">
-      <div class="brand-block"><strong>RandStudio</strong><span>Timeline Engine v0.2</span></div>
-      <div class="top-actions"><button id="undoBtn" title="Annulla">↶</button><button id="redoBtn" title="Ripeti">↷</button><button id="saveProjectBtn">Salva progetto</button><label class="button">Apri progetto<input id="projectInput" type="file" accept="application/json" hidden></label><button id="exportVideoBtn" class="primary">Esporta MP4</button></div>
+      <div class="brand-block"><strong>RandStudio</strong><span>Create. Edit. Transform. With AI.</span></div>
+      <div class="search-shell" aria-hidden="true">⌕ Cerca media, effetti, progetti…</div>
+      <div class="top-actions"><button id="undoBtn" title="Annulla">↶</button><button id="redoBtn" title="Ripeti">↷</button><button id="saveProjectBtn">Salva</button><label class="button">Apri<input id="projectInput" type="file" accept="application/json" hidden></label><button id="exportVideoBtn" class="primary">Esporta</button></div>
     </header>
-    <aside class="library-panel panel"><div class="panel-title"><span>Media</span><label class="button small">+ Importa<input id="mediaInput" type="file" accept="image/*,video/*,audio/*" multiple hidden></label></div><div id="dropZone" class="drop-zone">Trascina foto, video o audio</div><div id="mediaList" class="media-list"></div></aside>
-    <main class="preview-panel panel"><div class="preview-toolbar"><span id="previewLabel">Nessuna clip selezionata</span><span id="timeLabel">00:00.000</span></div><div class="stage"><div id="emptyPreview" class="empty-preview">Importa un media e aggiungilo alla timeline.</div><img id="imagePreview" alt="Preview" hidden /><video id="videoPreview" controls playsinline hidden></video><audio id="audioPreview" controls hidden></audio></div><div class="transport"><button id="playBtn">▶</button><input id="playhead" type="range" min="0" max="1" step="0.01" value="0" /><button id="splitBtn">Split</button></div></main>
-    <aside class="inspector-panel panel"><div class="panel-title">Inspector</div><div id="inspectorEmpty" class="muted">Seleziona una clip.</div><form id="clipInspector" hidden><label>Nome<input id="clipName" type="text"></label><div class="two"><label>Start<input id="clipStart" type="number" min="0" step="0.1"></label><label>Durata<input id="clipDuration" type="number" min="0.05" step="0.1"></label></div><div class="two"><label>In<input id="clipIn" type="number" min="0" step="0.1"></label><label>Out<input id="clipOut" type="number" min="0.05" step="0.1"></label></div><label>Scala<input id="clipScale" type="range" min="0.25" max="2" step="0.05" value="1"></label><label>Rotazione<input id="clipRotation" type="range" min="-180" max="180" step="1" value="0"></label><div class="danger-row"><button id="deleteClipBtn" type="button">Elimina clip</button></div></form><hr><div class="panel-title">Export engine</div><div id="engineStatus" class="status">FFmpeg: pronto al caricamento</div><progress id="exportProgress" max="1" value="0"></progress></aside>
-    <section class="timeline-panel panel"><div class="timeline-head"><div><strong>Timeline</strong><span id="durationLabel">0.0 s</span></div><div><button id="addVideoTrackBtn">+ Video track</button><button id="addAudioTrackBtn">+ Audio track</button></div></div><div class="ruler" id="ruler"></div><div id="timelineTracks" class="timeline-tracks"></div></section>
+
+    <aside class="library-panel panel">
+      <div class="panel-title"><span>Media Library</span><label class="button small primary">+ Importa<input id="mediaInput" type="file" accept="image/*,video/*,audio/*" multiple hidden></label></div>
+      <div class="tabs"><button class="tab active">Tutti</button><button class="tab">Video</button><button class="tab">Immagini</button><button class="tab">Audio</button></div>
+      <div id="dropZone" class="drop-zone">Trascina foto, video o audio</div>
+      <div id="mediaList" class="media-list"></div>
+    </aside>
+
+    <main class="preview-panel panel">
+      <div class="preview-toolbar"><span id="previewLabel">Nessuna clip selezionata</span><div class="preview-options"><span>9:16</span><span>1080p</span><span id="timeLabel">00:00.000</span></div></div>
+      <div class="stage"><div id="emptyPreview" class="empty-preview"><strong>Importa un media</strong><span>e aggiungilo alla timeline.</span></div><img id="imagePreview" alt="Preview" hidden /><video id="videoPreview" controls playsinline hidden></video><audio id="audioPreview" controls hidden></audio></div>
+      <div class="transport"><button id="playBtn">▶</button><input id="playhead" type="range" min="0" max="1" step="0.01" value="0" /><button id="splitBtn">Split</button></div>
+    </main>
+
+    <aside class="inspector-panel panel">
+      <div class="panel-title">Inspector</div>
+      <div id="inspectorEmpty" class="muted">Seleziona una clip.</div>
+      <form id="clipInspector" hidden><label>Nome<input id="clipName" type="text"></label><div class="two"><label>Start<input id="clipStart" type="number" min="0" step="0.1"></label><label>Durata<input id="clipDuration" type="number" min="0.05" step="0.1"></label></div><div class="two"><label>In<input id="clipIn" type="number" min="0" step="0.1"></label><label>Out<input id="clipOut" type="number" min="0.05" step="0.1"></label></div><label>Scala<input id="clipScale" type="range" min="0.25" max="2" step="0.05" value="1"></label><label>Rotazione<input id="clipRotation" type="range" min="-180" max="180" step="1" value="0"></label><div class="danger-row"><button id="deleteClipBtn" type="button">Elimina clip</button></div></form>
+      <hr>
+      <div class="panel-title">Effetti</div>
+      <div class="effect-grid" id="effectPresets"><button data-effect-preset="clean">Clean</button><button data-effect-preset="cinematic">Cinema</button><button data-effect-preset="vivid">Vivid</button><button data-effect-preset="bw">B/N</button><button data-effect-preset="vhs">VHS</button><button data-effect-preset="ntsc">NTSC</button></div>
+      <p class="muted effect-note">Preview veloce nel browser; export autorevole via FFmpeg. Pipeline pronta per WebGPU/Rust-WASM.</p>
+      <hr>
+      <div class="panel-title">AI Tools</div>
+      <div class="ai-list"><button data-ai-motion="Zoom Out">✦ Drone Reveal</button><button data-ai-motion="Pan Up">↑ Pan Up</button><button data-ai-motion="Zoom In">⊕ Zoom In</button></div>
+      <hr>
+      <div class="panel-title">Export engine</div><div id="engineStatus" class="status">FFmpeg: pronto al caricamento</div><progress id="exportProgress" max="1" value="0"></progress>
+    </aside>
+
+    <section class="timeline-panel panel">
+      <div class="timeline-head"><div><strong>Timeline</strong><span id="durationLabel">0.0 s</span></div><div><button id="addVideoTrackBtn">+ Video</button><button id="addAudioTrackBtn">+ Audio</button></div></div>
+      <div class="ruler" id="ruler"></div><div id="timelineTracks" class="timeline-tracks"></div>
+    </section>
   </div>
   <script type="module" src="/src/app.js"></script>
 </body>
