@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createKineticText,materializeKineticText} from '../src/graphics/kinetic-text.js';
+import {easingValue,interpolateKeyframes} from '../src/core/easing.js';
+import {setTransformKeyframe,evaluateTransform,ffmpegPiecewise} from '../src/core/transform-keyframes.js';
+import {transitionFilters} from '../src/core/transition-engine.js';
+import {normalizeAudioSpec,audioFilters,sidechainSettings} from '../src/audio/audio-engine.js';
+import {createTrack,trackAt,createRectMask,createVisionJob,VisionProviderRegistry} from '../src/vision/vision-engine.js';
+import {compositeSnapshot} from '../src/preview/composite-preview.js';
+import {createProject,addClip} from '../src/core/composition.js';
+
+test('kinetic text materializes progressive text',()=>{const spec=createKineticText('ciao mondo','wordPop');const rows=materializeKineticText(spec,{start:2});assert.equal(rows.length,2);assert.equal(rows[0].text,'ciao');assert.equal(rows[1].text,'ciao mondo');assert.ok(rows[1].start>rows[0].start)});
+test('typewriter materializes characters',()=>{const rows=materializeKineticText(createKineticText('abc','typewriter'));assert.deepEqual(rows.map(x=>x.text),['a','ab','abc'])});
+test('easing and transform keyframes interpolate',()=>{assert.ok(easingValue('easeOut',.5)>.5);let clip={transform:{x:0,y:0,scale:1,rotation:0},opacity:1,keyframes:{}};clip=setTransformKeyframe(clip,'x',0,0);clip=setTransformKeyframe(clip,'x',2,100,'linear');assert.equal(Math.round(evaluateTransform(clip,1).x),50);assert.match(ffmpegPiecewise(clip.keyframes.transform.x,{timeVar:'t'}),/if\(/)});
+test('transition presets compile to ffmpeg filters',()=>{assert.match(transitionFilters('blur')[0],/gblur/);assert.match(transitionFilters({id:'fade',out:true},{clipDuration:2}).at(-1),/fade=t=out/)});
+test('audio engine normalizes filters and ducking',()=>{const spec=normalizeAudioSpec({role:'music',normalize:true,fadeIn:.5,fadeOut:.5,ducking:{amount:.5}});const f=audioFilters(spec,4).join(',');assert.match(f,/loudnorm/);assert.match(f,/afade=t=in/);assert.ok(sidechainSettings(spec).ratio>=2)});
+test('tracking and masks are deterministic',()=>{const t=createTrack([{t:0,x:0,y:0},{t:2,x:100,y:50}]);const p=trackAt(t,1);assert.equal(Math.round(p.x),50);const m=createRectMask({x:10,y:20,width:100,height:80});assert.equal(m.schema,'randstudio.mask/v1')});
+test('vision registry validates provider and jobs',async()=>{const job=createVisionJob('upscale',{clipId:'c1'});const r=new VisionProviderRegistry().register({id:'fake',tools:['upscale'],async run(j){return{id:j.id,ok:true}}});assert.equal((await r.run('fake',job)).ok,true)});
+test('composite preview returns multiple active layers',()=>{let p=createProject();p=addClip(p,'video-1',{id:'a',sourceId:'a',name:'A',type:'video',start:0,in:0,out:3,duration:3});p.tracks.push({id:'overlay',name:'Overlay',kind:'visual',clips:[]});p=addClip(p,'overlay',{id:'b',sourceId:'b',name:'B',type:'image',start:0,in:0,out:3,duration:3});assert.equal(compositeSnapshot(p,1).length,2)});
+test('composition persists finish metadata',()=>{let p=createProject();p=addClip(p,'video-1',{sourceId:'x',type:'video',in:0,out:2,duration:2,transitionIn:{id:'fade'},audio:{schema:'randstudio.audio/v1',role:'auto'},track:createTrack([{t:0,x:1,y:2}]),mask:createRectMask({width:10,height:10}),kinetic:createKineticText('x')});const c=p.tracks[0].clips[0];assert.equal(c.transitionIn.id,'fade');assert.equal(c.track.schema,'randstudio.track/v1');assert.equal(c.kinetic.schema,'randstudio.kinetic-text/v1')});

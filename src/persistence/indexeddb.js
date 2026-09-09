@@ -19,7 +19,11 @@ export class RandStudioDB {
     });
     return this.dbPromise;
   }
-  async saveProject(project) { return this.#put(PROJECTS, { ...structuredClone(project), savedAt: Date.now() }); }
+  async saveProject(project) {
+    if (!project?.id || typeof project.id !== 'string') throw new Error('Progetto senza id: salvataggio annullato');
+    if (!Array.isArray(project.tracks)) throw new Error('Progetto senza timeline: salvataggio annullato');
+    return this.#put(PROJECTS, { ...structuredClone(project), savedAt: Date.now() });
+  }
   async loadProject(id) { return this.#get(PROJECTS, id); }
   async latestProject() {
     const all = await this.#all(PROJECTS);
@@ -51,5 +55,5 @@ export function bestRelink(storedItems, file) {
   return storedItems.map((item) => ({ item, score: relinkScore(item, file) })).sort((a,b)=>b.score-a.score)[0] ?? null;
 }
 
-function txPromise(db, store, mode, action) { return new Promise((resolve, reject) => { const tx=db.transaction(store,mode); action(tx.objectStore(store)); tx.oncomplete=()=>resolve(); tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error); }); }
+function txPromise(db, store, mode, action) { return new Promise((resolve, reject) => { const tx=db.transaction(store,mode); try { action(tx.objectStore(store)); } catch (error) { reject(error); return; } tx.oncomplete=()=>resolve(); tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error); }); }
 function txResult(db, store, mode, action) { return new Promise((resolve, reject) => { const tx=db.transaction(store,mode); const req=action(tx.objectStore(store)); req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); }); }

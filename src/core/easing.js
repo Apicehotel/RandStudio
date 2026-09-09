@@ -1,0 +1,4 @@
+export const EASINGS=Object.freeze({linear:t=>t,easeIn:t=>t*t,easeOut:t=>1-(1-t)*(1-t),easeInOut:t=>t<.5?2*t*t:1-((-2*t+2)**2)/2,backOut:t=>{const c1=1.70158,c3=c1+1;return 1+c3*(t-1)**3+c1*(t-1)**2}});
+export function easingValue(id,t){const f=EASINGS[id]||EASINGS.linear;return f(clamp(Number(t),0,1))}
+export function interpolateKeyframes(frames,time,defaultValue=0){const list=(frames||[]).map(f=>({time:Number(f.time)||0,value:Number(f.value),easing:f.easing||'linear'})).filter(f=>Number.isFinite(f.value)).sort((a,b)=>a.time-b.time);if(!list.length)return defaultValue;if(time<=list[0].time)return list[0].value;if(time>=list.at(-1).time)return list.at(-1).value;for(let i=0;i<list.length-1;i++){const a=list[i],b=list[i+1];if(time<=b.time){const p=(time-a.time)/Math.max(1e-9,b.time-a.time),e=easingValue(b.easing||a.easing,p);return a.value+(b.value-a.value)*e}}return list.at(-1).value}
+function clamp(v,a,b){return Math.min(b,Math.max(a,v))}
