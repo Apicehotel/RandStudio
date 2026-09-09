@@ -1,6 +1,6 @@
 # RandStudio
 
-RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, persistenza e AI.
+RandStudio è uno studio locale-first per foto e video. Il progetto usa un documento Composition JSON versionato che separa timeline, preview, rendering, effetti, grafica, persistenza e AI.
 
 ## Point 1 — motore editor
 - timeline visual/audio multi-track
@@ -25,15 +25,7 @@ UI -> AI Provider Registry
       Composition JSON -> Timeline
 ```
 
-### Implementato
-- `ComfyUIAdapter`: system stats, object info, queue, history, enqueue, interrupt e URL output
-- `AIJobQueue`: queued/running/completed/failed/cancelled
-- `AIProviderRegistry`: provider intercambiabili
-- `GatewayProvider`: endpoint remoto senza API key nel client
-- contratto `randstudio.wan-camera/v1`
-- preset Drone Reveal / Rise / Approach
-- binding semantico dei workflow Wan, nessun node-id fragile nel core
-- output AI reinseribile come clip `ai-generated`
+Implementato: `ComfyUIAdapter`, `AIJobQueue`, `AIProviderRegistry`, `GatewayProvider`, contratto `randstudio.wan-camera/v1`, preset Drone Reveal/Rise/Approach, binding semantico workflow Wan e reinserimento output AI come clip.
 
 Per generare realmente serve almeno un runtime esterno raggiungibile: ComfyUI/Wan locale oppure un gateway AI remoto. Il repository non incorpora pesi multi-GB né credenziali.
 
@@ -48,61 +40,61 @@ Per generare realmente serve almeno un runtime esterno raggiungibile: ComfyUI/Wa
 - modalità **Grande** persistente
 
 ### Effects Engine
-Gli effetti sono dati strutturati sulla clip.
+Gli effetti sono dati strutturati sulla clip. Preview WebGPU/fallback browser, export autorevole FFmpeg, LUT3D e keyframe.
 
-```text
-Clip.effects
-   |
-   +--> preview -> WebGPU quando disponibile
-   |             -> browser fallback
-   |             -> LUT CPU preview
-   |
-   +--> export  -> FFmpeg
-   |             -> LUT3D
-   |             -> keyframe expressions
-   |
-   +--> futuro  -> Rust/WASM opzionale
-```
+Preset inclusi: Clean, Cinema, **Cinema Pro**, Dreamy Glow, Vivid, B/N, VHS, NTSC.
 
-Preset inclusi: Clean, Cinema, Vivid, B/N, VHS, NTSC.
+Effetti disponibili nel blocco cinema/overlay: luminosità, contrasto, saturazione, grayscale, blur, glow, vignetta, film grain, VHS, NTSC e scanlines.
 
 AiyaEffectsIOS, VideoBeautify e `ntsc-rs` sono usati come riferimenti architetturali. Non vengono copiati SDK iOS, asset proprietari o codice con licenza incerta.
 
-## Point 4 — Advanced Runtime completato
+## Point 4 — Advanced Runtime
 
 ### WebGPU
-`src/effects/webgpu-renderer.js` implementa una pipeline WebGPU per preview real-time di luminosità, contrasto, saturazione e grayscale. Quando WebGPU non è disponibile RandStudio usa il renderer browser esistente.
+`src/effects/webgpu-renderer.js` implementa preview real-time di luminosità, contrasto, saturazione e grayscale. Fallback browser automatico.
 
 ### LUT `.cube`
-- import `.cube` dalla Media Library
-- parser `LUT_3D_SIZE`, `DOMAIN_MIN/MAX`, samples
-- validazione dimensione e campioni
-- preview LUT su canvas
-- export FFmpeg con `lut3d`
-- LUT salvata come asset persistente e collegabile alla clip
+Import, parser/validazione, preview canvas, persistenza e export FFmpeg `lut3d`.
 
 ### Keyframe
-- keyframe numerici versionabili nei singoli effetti
-- interpolazione lineare nella preview
-- luminosità animabile direttamente dall'Inspector
-- compiler FFmpeg con espressioni `eval=frame` per brightness / contrast / saturation e supporto grayscale
-- struttura generica pronta per estendere altri parametri
+Keyframe numerici, interpolazione preview e expression compiler FFmpeg per i controlli colore supportati.
 
 ### IndexedDB / relink
-`src/persistence/indexeddb.js` salva:
-- progetto più recente
-- blob originali media
-- LUT
-- metadati di relink
-
-All'avvio RandStudio ripristina sessione e asset locali. Il relink dispone di scoring su nome, size, lastModified e MIME.
+`src/persistence/indexeddb.js` salva progetto, blob media, LUT e metadati di relink; ripristino automatico all'avvio.
 
 ### Provider AI
-`src/ai/provider-registry.js` separa UI e provider. Sono disponibili:
-- `ComfyUIProvider` per runtime locale
-- `GatewayProvider` per runtime remoto/self-hosted
+`src/ai/provider-registry.js` separa UI e provider con ComfyUI locale e gateway remoto/self-hosted.
 
-Il gateway viene configurato dalla UI e salvato in `localStorage`. Nessuna chiave privata viene salvata nel client.
+## Point 5 — Text / Sticker / Overlay Engine
+
+`src/graphics/overlay-engine.js` introduce elementi grafici come clip vere della Composition, non come decorazioni fuori timeline.
+
+### Elementi inclusi
+- Titolo statico
+- Lower third con titolo + sottotitolo
+- Callout
+- Freccia
+- sticker rapidi emoji
+- sticker PNG/SVG importabili come normali media
+
+Ogni elemento grafico conserva un payload `randstudio.graphic/v1` con testo, font size, colore, background, accent e padding. Le clip grafiche hanno start/end/transform/effects come le altre clip, quindi possono essere spostate, scalate, ruotate, splittate e ricevere effetti.
+
+### Rendering grafica
+Per evitare dipendenze da font FFmpeg o SVG decoder variabili, RandStudio rasterizza gli overlay nel browser su PNG trasparente prima dell'export. Il PNG generato viene poi trattato dal compiler come un normale input visuale FFmpeg. Questo rende l'export più prevedibile su FFmpeg WASM.
+
+```text
+Graphic Clip
+   |
+   +--> Canvas renderer -> PNG trasparente
+   |                         |
+   |                         v
+   +--> preview          FFmpeg input
+                              |
+                              v
+                         export finale
+```
+
+Gli asset grafici generati non vengono salvati come duplicati permanenti: vengono rigenerati dal payload `graphic` dopo restore o modifica del testo.
 
 ## Architettura
 ```text
@@ -119,6 +111,8 @@ src/
 │   ├── keyframes.js
 │   ├── lut.js
 │   └── webgpu-renderer.js
+├── graphics/
+│   └── overlay-engine.js
 ├── persistence/
 │   └── indexeddb.js
 ├── ai/
@@ -143,8 +137,9 @@ npm run build
 ## Dipendenze runtime browser
 - `@ffmpeg/ffmpeg` 0.12.15
 - `@ffmpeg/util` 0.12.2
-- WebGPU opzionale, rilevato a runtime
+- WebGPU opzionale
 - IndexedDB nativo browser
+- Canvas 2D nativo per text/sticker/callout rasterization
 
 ## Sicurezza e workflow
 - nessuna API key nel client
@@ -153,14 +148,15 @@ npm run build
 - ogni modifica agente: branch dedicata + Pull Request
 - nessun agente scrive o deploya direttamente su `main`
 
-## Cosa resta davvero
-Non restano più i 5 blocchi strutturali precedenti. Le prossime evoluzioni sono miglioramenti di qualità/prodotto, non debiti architetturali obbligatori:
-- maschere e object tracking
-- stabilizzazione
-- object/background removal
-- upscale
-- più parametri keyframabili
-- renderer analogico Rust/WASM opzionale
+## Prossimi blocchi prodotto
+Il blocco base **Effetti + Testi + Sticker** è ora operativo. Le prossime evoluzioni sono:
+- testi animati / kinetic text
+- sticker animati e overlay video
+- easing/spring e più keyframe
+- speed ramp / freeze frame / split screen
+- sottotitoli smart e karaoke
+- tracking testo/sticker su oggetti
+- maschere, object/background removal, upscale
 - workflow AI reali preconfigurati quando viene scelto il runtime/provider definitivo
 
 ## Licenze
