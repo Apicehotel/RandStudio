@@ -1,13 +1,13 @@
 {
   "name": "randstudio",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test": "node --test",
-    "check": "node --check src/app.js && node --check src/core/composition.js && node --check src/core/history.js && node --check src/core/ffmpeg-compiler.js && node --check src/effects/effects-engine.js && node --check src/effects/keyframes.js && node --check src/effects/lut.js && node --check src/effects/webgpu-renderer.js && node --check src/persistence/indexeddb.js && node --check src/adapters/ffmpeg-wasm.js && node --check src/adapters/comfyui.js && node --check src/ai/job-queue.js && node --check src/ai/result-import.js && node --check src/ai/wan-camera.js && node --check src/ai/provider-registry.js"
+    "check": "node --check src/app.js && node --check src/core/composition.js && node --check src/core/history.js && node --check src/core/ffmpeg-compiler.js && node --check src/effects/effects-engine.js && node --check src/effects/keyframes.js && node --check src/effects/lut.js && node --check src/effects/webgpu-renderer.js && node --check src/graphics/overlay-engine.js && node --check src/persistence/indexeddb.js && node --check src/adapters/ffmpeg-wasm.js && node --check src/adapters/comfyui.js && node --check src/ai/job-queue.js && node --check src/ai/result-import.js && node --check src/ai/wan-camera.js && node --check src/ai/provider-registry.js"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "0.12.15",

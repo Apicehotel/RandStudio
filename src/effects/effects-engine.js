@@ -8,6 +8,9 @@ export const EFFECT_DEFINITIONS = Object.freeze({
   saturation:{id:'saturation',name:'Saturazione',category:'color',params:{amount:{min:0,max:2,step:.01,default:1}},css:v=>`saturate(${v.amount})`,ffmpeg:v=>`eq=saturation=${v.amount.toFixed(3)}`},
   grayscale:{id:'grayscale',name:'Bianco e nero',category:'color',params:{amount:{min:0,max:1,step:.01,default:1}},css:v=>`grayscale(${v.amount})`,ffmpeg:v=>`hue=s=${Math.max(0,1-v.amount).toFixed(3)}`},
   blur:{id:'blur',name:'Sfocatura',category:'blur',params:{radius:{min:0,max:24,step:.5,default:0}},css:v=>`blur(${v.radius}px)`,ffmpeg:v=>v.radius>0?`gblur=sigma=${Math.max(.1,v.radius/3).toFixed(2)}`:''},
+  glow:{id:'glow',name:'Glow',category:'overlay',params:{strength:{min:0,max:1,step:.05,default:.35}},css:v=>`drop-shadow(0 0 ${Math.round(18*v.strength)}px rgba(255,255,255,${(.45*v.strength).toFixed(2)}))`,ffmpeg:v=>`unsharp=5:5:${(-.7*v.strength).toFixed(2)}:5:5:0,eq=brightness=${(.04*v.strength).toFixed(3)}`},
+  vignette:{id:'vignette',name:'Vignetta',category:'overlay',params:{strength:{min:0,max:1,step:.05,default:.45}},css:()=>'',ffmpeg:v=>`vignette=PI/${Math.max(2,Math.round(8-4*v.strength))}`},
+  grain:{id:'grain',name:'Film Grain',category:'analog',params:{strength:{min:0,max:1,step:.05,default:.25}},css:()=>'',ffmpeg:v=>`noise=alls=${(2+18*v.strength).toFixed(1)}:allf=t+u`},
   vhs:{id:'vhs',name:'VHS',category:'analog',params:{strength:{min:0,max:1,step:.05,default:.45}},css:v=>`contrast(${1+.12*v.strength}) saturate(${1-.14*v.strength})`,ffmpeg:v=>`noise=alls=${(8+22*v.strength).toFixed(1)}:allf=t,chromashift=cbh=${Math.round(2+6*v.strength)}:crh=${Math.round(-2-6*v.strength)}`},
   ntsc:{id:'ntsc',name:'NTSC',category:'analog',params:{strength:{min:0,max:1,step:.05,default:.35}},css:v=>`contrast(${1+.08*v.strength}) saturate(${1-.08*v.strength})`,ffmpeg:v=>`chromashift=cbh=${Math.round(1+5*v.strength)}:crh=${Math.round(-1-5*v.strength)},noise=alls=${(4+14*v.strength).toFixed(1)}:allf=t`},
   scanlines:{id:'scanlines',name:'Scanline',category:'analog',params:{strength:{min:0,max:1,step:.05,default:.3}},css:()=>'',ffmpeg:v=>`geq=lum='lum(X,Y)*(1-${(.18*v.strength).toFixed(3)}*mod(Y,2))':cb='cb(X,Y)':cr='cr(X,Y)'`},
@@ -16,8 +19,10 @@ export const EFFECT_DEFINITIONS = Object.freeze({
 export const EFFECT_PRESETS = Object.freeze({
   clean:{name:'Clean',effects:[]},
   cinematic:{name:'Cinema',effects:[effect('contrast',{amount:1.08}),effect('saturation',{amount:.9})]},
+  cinemaPro:{name:'Cinema Pro',effects:[effect('contrast',{amount:1.1}),effect('saturation',{amount:.88}),effect('vignette',{strength:.35}),effect('grain',{strength:.16}),effect('glow',{strength:.15})]},
   vivid:{name:'Vivid',effects:[effect('contrast',{amount:1.06}),effect('saturation',{amount:1.28})]},
-  bw:{name:'B/N',effects:[effect('grayscale',{amount:1}),effect('contrast',{amount:1.1})]},
+  bw:{name:'B/N',effects:[effect('grayscale',{amount:1}),effect('contrast',{amount:1.1}),effect('grain',{strength:.12})]},
+  dreamy:{name:'Dreamy Glow',effects:[effect('glow',{strength:.55}),effect('saturation',{amount:1.08})]},
   vhs:{name:'VHS',effects:[effect('vhs',{strength:.5}),effect('contrast',{amount:1.05})]},
   ntsc:{name:'NTSC',effects:[effect('ntsc',{strength:.4}),effect('scanlines',{strength:.25})]},
 });
